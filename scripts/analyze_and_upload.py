@@ -233,7 +233,35 @@ def analyze_shot_visuals(img_path, shot_idx=1, total_shots=1):
         "contrast": round(float(std_bright), 1)
     }
 
-def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data):
+
+def extract_video_dialogue(video_path):
+    """Trích xuất phụ đề/thoại nguyên bản nếu có tiếng nói bằng Whisper"""
+    if not os.path.exists(video_path):
+        return None
+    try:
+        import whisper
+        model = whisper.load_model('small')
+        res = model.transcribe(video_path)
+        full_text = res.get('text', '').strip()
+        if not full_text or len(full_text) < 10:
+            return None
+        raw_segments = res.get('segments', [])
+        valid_segments = []
+        for s in raw_segments:
+            txt = s.get('text', '').strip()
+            if txt and not re.match(r'^(\[.*\]|\(.*\))$', txt) and len(txt) > 3:
+                valid_segments.append({
+                    "start": round(float(s.get('start', 0.0)), 2),
+                    "end": round(float(s.get('end', 0.0)), 2),
+                    "en": txt,
+                    "vi": "" # Có thể dịch tự động hoặc ánh xạ
+                })
+        return valid_segments if valid_segments else None
+    except Exception as e:
+        print(f"[-] Dialogue transcription skipped: {e}")
+        return None
+
+def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None):
     """Sinh mã HTML Mobile-First Responsive cao cấp với cấu trúc phân tích cảnh logic chuyên sâu"""
     shots_count = len(shots_data)
     total_dur = f"{shots_data[-1]['end_time']:.2f}s" if shots_data else "N/A"
@@ -353,7 +381,174 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
     all_cards = "\n".join(cards_html)
     all_grid = "\n".join(grid_html)
     all_drawer = "\n".join(drawer_html)
-    
+
+    dialogue_section_html = ""
+    # PHÂN LOẠI 3 NHÁNH THỰC CHIẾN THEO CHUẨN ANH VIỆT:
+    # Nhánh 1: Video có lời thoại kể chuyện (Spoken / Storytelling)
+    if speech_data and len(speech_data) > 0:
+        vn_items = []
+        en_items = []
+        for idx, item in enumerate(speech_data):
+            st = item.get("start", 0.0)
+            et = item.get("end", 0.0)
+            en_txt = item.get("en", "").strip()
+            vi_txt = item.get("vi", "").strip() or en_txt
+            beat_label = item.get("beat") or f"Phân đoạn #{idx+1:02d}"
+            
+            vn_items.append(f"""
+                    <div class="vn-script-para" onclick="playShot({st}, {et}, '{beat_label}')">
+                        <div class="para-meta-line">
+                            <span class="para-timestamp-tag">{st:.2f}s</span>
+                            <span class="para-beat-label">{beat_label}</span>
+                        </div>
+                        <span class="para-text">"{vi_txt}"</span>
+                    </div>
+            """)
+            
+            en_items.append(f"""
+                    <div class="en-line-item" onclick="playShot({st}, {et}, 'ORIGINAL')">
+                        <span class="en-time">{st:.2f}s</span>
+                        <div class="en-text">"{en_txt}"</div>
+                    </div>
+            """)
+
+        all_vn_rows = "\n".join(vn_items)
+        all_en_rows = "\n".join(en_items)
+
+        dialogue_section_html = f"""
+        <!-- BẢNG KỊCH BẢN THOẠI 2 CỘT (TIẾNG VIỆT ĐỌC LIỀN MẠCH + TIẾNG ANH KHỐI NHỎ BÊN CẠNH) -->
+        <div class="dialogue-container-2col">
+            <!-- CỘT CHÍNH (TRÁI): TIẾNG VIỆT ĐỌC LIỀN MẠCH KHÔNG NGẮT QUÃNG -->
+            <div class="col-vietnamese-flow">
+                <div class="col-flow-header">
+                    <div class="col-flow-badge">🎙️ KỊCH BẢN LỜI THOẠI (BẢN DỊCH THỰC CHIẾN)</div>
+                    <span class="col-flow-subtag">Đọc liền một mạch • Chuẩn 4 nhịp giữ chân</span>
+                </div>
+                <div class="vn-script-body">
+                    {all_vn_rows}
+                </div>
+            </div>
+
+            <!-- CỘT PHỤ (PHẢI): KHỐI NHỎ CHỮ BÉ XÍU ĐỐI SOÁT TIẾNG ANH -->
+            <div class="col-english-aside">
+                <div class="col-aside-header">
+                    <span class="aside-title">ORIGINAL TRANSCRIPT</span>
+                    <span class="aside-note">Phụ / Đối chiếu</span>
+                </div>
+                <div class="en-lines-list">
+                    {all_en_rows}
+                </div>
+            </div>
+        </div>
+
+        <!-- KHỐI PROMPT ÁNH XẠ SANG NGÀNH NGHỀ (GEMINI MEGA PROMPT ACCORDION ĐÓNG MẶC ĐỊNH) -->
+        <div class="remake-prompt-card" id="remakePromptCard">
+            <div class="prompt-accordion-header" onclick="togglePromptAccordion(this)">
+                <div class="prompt-header-left">
+                    <span class="remake-header-badge">✨ KỊCH BẢN STU</span>
+                    <span class="remake-accordion-title">Ánh xạ kịch bản này sang ngành nghề của bạn (Gemini Prompt)</span>
+                </div>
+                <div class="prompt-header-right">
+                    <button class="copy-prompt-btn-compact" onclick="copyMegaPrompt(event, this)">📋 Sao chép</button>
+                    <div class="prompt-toggle-btn">
+                        <span class="toggle-icon">▼</span>
+                        <span class="toggle-label">Mở xem</span>
+                    </div>
+                </div>
+            </div>
+            <div class="prompt-accordion-body" style="display: none;">
+                <p class="remake-subtext">Sao chép Mega Prompt này dán vào Gemini. Hệ thống tự động gợi ý đúng các ngành nghề học viên thực tế trong STU để xuất bản ngay 3 phương án kịch bản tương ứng theo chuẩn văn phong mộc mạc anh Việt (đã lọc sạch 100% văn mẫu).</p>
+
+                <div class="prompt-code-wrapper">
+                    <div class="prompt-code-toolbar">
+                        <span class="prompt-code-filename">📄 MEGA_PROMPT_REMAKE_GEMINI.md</span>
+                        <button class="copy-prompt-btn" onclick="copyMegaPrompt(event, this)">📋 Sao chép Prompt</button>
+                    </div>
+                    <div class="prompt-code-content" id="megaPromptText">Bạn là Đạo diễn Video Ngắn &amp; Chuyên gia Tinh chỉnh Lời thoại Thực Chiến theo trường phái mộc mạc của anh Việt (nguyen-viet-voice).
+
+Tôi có cấu trúc logic giữ chân 26 giây đắt giá từ video mẫu với 4 nhịp:
+1. Hook 3s: Nêu sự thật trần trụi về một việc ai cũng nghĩ là đơn giản.
+2. Xung đột 2 vế: Cái cớ chủ quan giữ thể diện ("Tưởng 2 phút là xong") đối đầu với Thực tế khách quan ("Vào cuộc mới biết mất cả buổi / ở lại mấy ngày").
+3. Tactile B-roll: Bàn tay liên tục đặt từng món đồ nghề/chi tiết thật xuống bàn làm việc theo nhịp nói (âm thanh thực tế, mắt thấy tai nghe).
+4. Kết bài tự trào &amp; Mở lời tự nhiên: Thừa nhận cái khó của người làm nghề, nhờ người xem chỉ giùm kinh nghiệm hoặc đặt câu hỏi mở chân thành.
+
+=== QUY TẮC BẮT BUỘC VỀ VĂN PHONG ANH VIỆT (TUÂN THỦ 100%) ===
+- CẤM TUYỆT ĐỐI VĂN MẪU AI &amp; TỪ NGỮ SÁO RỖNG: Không dùng 'bứt phá', 'chuyển hóa', 'vũ khí', 'thần thái', 'ma trận', 'nâng tầm', 'chạm cảm xúc', 'khơi gợi nhu cầu', 'giải pháp toàn diện', 'tối ưu hóa', 'đỉnh cao', 'bí quyết', 'bật mí', 'ngộ nhận', 'rào cản', 'tử huyệt'...
+- CẤM TUYỆT ĐỐI TỪ 'ÔNG GIÁO' hoặc xưng hô thầy bà dạy đời. Đại từ xưng hô chuẩn mực: 'mình - bạn' hoặc 'tôi - bạn'.
+- CẤM TUYỆT ĐỐI MƯỢN CỚ SỐ ĐÔNG: Không dùng 'anh em mình', 'nhiều người ngoài kia', 'chúng ta thường hay'. Đi thẳng một đường thẳng vào bản chất sự việc.
+- GIỮ TRỌN VĂN PHONG MỘC MẠC: Giọng người làm nghề khiêm tốn, biết đến đâu chia sẻ đến đấy, có nụ cười tự trào duyên dáng, tôn trọng thời gian người xem.
+
+=== HƯỚNG DẪN TƯƠNG TÁC (QUÉT TỪ CÁC NGÀNH NGHỀ HỌC VIÊN TRONG STU) ===
+Nếu trong tin nhắn này tôi ĐÃ GHI SẴN thông tin ngành nghề ở cuối, hãy BỎ QUA bước hỏi và XUẤT BẢN NGAY 3 kịch bản.
+
+Nếu tôi CHƯA GHI ngành nghề, hãy DỪNG LẠI và chỉ gửi duy nhất menu 1 câu ngắn gọn sau:
+
+"Chào bạn, để viết đúng đồ nghề và cảnh quay thực tế tại chỗ làm việc của bạn (theo nhóm ngành học viên trong STU), bạn chọn ngành nào dưới đây (chỉ cần gõ số 1, 2, 3, 4, 5 hoặc gõ 1 dòng ngắn):
+1. Làm đẹp & Spa / Da liễu Clinic / Phun xăm / Salon tóc (Bàn soi da, khay dụng cụ, kem dưỡng, kéo lược)
+2. Nội thất / Decor / Kiến trúc / Vật liệu xây dựng (Bàn làm việc, thước đo, mẫu gỗ, bảng màu sơn, bản vẽ)
+3. Ẩm thực & F&B / Tiệm bánh / Trà đồ uống (Mặt bàn pha chế, thớt dao, cân tiểu ly, ly cốc)
+4. Nông nghiệp / Phân bón / Chăm sóc sức khỏe / Dược liệu (Bao bì mẫu, cây giống, khay dinh dưỡng, bình xịt)
+5. Ngành khác của bạn trong STU: Bạn nhắn giúp mình: [Tên nghề] + [Khách hay tưởng lầm điều gì] + [3 món đồ trên bàn làm việc]"
+
+Sau khi tôi chọn hoặc điền 1 dòng, hãy xuất bản ngay 3 PHƯƠNG ÁN KỊCH BẢN CHI TIẾT TỪNG GIÂY (Gồm 4 cột: Thời lượng | Hình ảnh B-roll xúc giác | Lời thoại A-roll mộc mạc | Âm thanh Foley thực tế) được lọc sạch 100% văn mẫu!</div>
+                </div>
+            </div>
+        </div>
+        """
+    else:
+        # Nhánh 2: Video Kỹ Thuật Quay Thuần Túy (Không thoại)
+        corpus_check = f"{title} {fname} {overview_text}".lower()
+        is_tech = any(k in corpus_check for k in ["transition", "camera", "angle", "cut", "movement", "whip_pan", "match_cut", "spin", "static_shot", "speed_ramp", "chuyen_canh", "ky_thuat_quay", "b-roll", "broll"])
+        if is_tech:
+            dialogue_section_html = f"""
+        <!-- KHỐI PROMPT ÁNH XẠ KỸ THUẬT CÚ MÁY SANG NGÀNH NGHỀ STU (ACCORDION ĐÓNG MẶC ĐỊNH) -->
+        <div class="remake-prompt-card" id="remakePromptCard">
+            <div class="prompt-accordion-header" onclick="togglePromptAccordion(this)">
+                <div class="prompt-header-left">
+                    <span class="remake-header-badge">🎥 CÚ MÁY STU</span>
+                    <span class="remake-accordion-title">Ánh xạ kỹ thuật quay này sang ngành nghề của bạn (Gemini Prompt)</span>
+                </div>
+                <div class="prompt-header-right">
+                    <button class="copy-prompt-btn-compact" onclick="copyMegaPrompt(event, this)">📋 Sao chép</button>
+                    <div class="prompt-toggle-btn">
+                        <span class="toggle-icon">▼</span>
+                        <span class="toggle-label">Mở xem</span>
+                    </div>
+                </div>
+            </div>
+            <div class="prompt-accordion-body" style="display: none;">
+                <p class="remake-subtext">Video này thuần túy về kỹ thuật quay (không thoại). Sao chép Mega Prompt này dán vào Gemini để AI hướng dẫn áp dụng cú máy/chuyển cảnh này vào quay sản phẩm thực tế cho học viên STU (100% hình ảnh xúc giác, không cần nói).</p>
+
+                <div class="prompt-code-wrapper">
+                    <div class="prompt-code-toolbar">
+                        <span class="prompt-code-filename">📄 MEGA_PROMPT_TECHNIQUE_REMAKE_GEMINI.md</span>
+                        <button class="copy-prompt-btn" onclick="copyMegaPrompt(event, this)">📋 Sao chép Prompt</button>
+                    </div>
+                    <div class="prompt-code-content" id="megaPromptText">Bạn là Đạo diễn Hình ảnh &amp; Chuyên gia Hướng Dẫn Thao Tác Cú Máy Thực Chiến (In-Camera Cinematography) theo trường phái mộc mạc của anh Việt.
+
+Tôi vừa học được kỹ thuật quay / chuyển cảnh cực kỳ đắt giá: {title}.
+Video này KHÔNG CÓ LỜI THOẠI, sức hút nằm ở góc đặt máy, tiêu cự và chuyển động camera.
+
+=== QUY TẮC BẮT BUỘC (TUÂN THỦ 100%) ===
+- CẤM BỊA KỊCH BẢN NÓI DÔNG DÀI: Tôi không cần kịch bản nói hay lý thuyết đạo lý. Tôi cần hướng dẫn cầm điện thoại quay gì, lia máy hướng nào, đặt góc nào tại bàn làm việc thực tế.
+- CẤM VĂN MẪU AI: Không dùng 'nâng tầm', 'bứt phá', 'thần thái', 'vũ khí', 'chuyển hóa'...
+- VĂN PHONG MỘC MẠC: Xưng 'mình - bạn', hướng dẫn cầm tay chỉ việc như người làm nghề chỉ cho nhau.
+
+=== HƯỚNG DẪN TƯƠNG TÁC THEO NGÀNH HỌC VIÊN STU ===
+Nếu tôi chưa ghi ngành, hãy hỏi đúng 1 câu:
+"Chào bạn, bạn muốn áp dụng cú máy này vào quay sản phẩm nào trong 4 nhóm ngành STU:
+1. Làm đẹp & Spa / Da liễu Clinic / Salon tóc (Quay cận cảnh chất kem, thao tác tay, máy soi da)
+2. Nội thất / Decor / Kiến trúc / Vật liệu xây dựng (Quay lia từ thớ gỗ/mẫu đá sang không gian hoàn thiện)
+3. Ẩm thực & F&B / Tiệm bánh / Trà đồ uống (Quay lia chuyển động quanh món ăn, đổ sốt, khói bốc lên)
+4. Nông nghiệp / Phân bón / Sức khỏe (Quay kiểm tra lá cây, rễ cây, hạt giống, bao bì sản phẩm)
+5. Ngành khác của bạn trong STU: [Tên nghề] + [Sản phẩm muốn quay]"
+
+Sau khi tôi chọn, hãy xuất bản ngay 3 PHƯƠNG ÁN BỐ TRÍ CÚ MÁY (Gồm 4 thông số: Tiêu cự ống kính | Hướng lia máy & Điểm giấu vết cắt | Đạo cụ trên bàn | Cách phối ánh sáng tự nhiên)!</div>
+                </div>
+            </div>
+        </div>
+        """
+
     return f'''<!DOCTYPE html>
 <html lang="vi">
 <head>
@@ -1178,6 +1373,383 @@ video#mainPlayer {{
     font-size: 32px;
     cursor: pointer;
 }}
+
+/* Styling for 2-Column Dialogue Script & Remake Prompt Box */
+.dialogue-container-2col {{
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+    margin-bottom: 20px;
+}}
+
+@media (max-width: 900px) {{
+    .dialogue-container-2col {{
+        flex-direction: column;
+    }}
+}}
+
+/* CỘT CHÍNH (TRÁI): TIẾNG VIỆT ĐỌC LIỀN MẠCH */
+.col-vietnamese-flow {{
+    flex: 1;
+    min-width: 0;
+    background: #0d1422;
+    border: 1px solid #1e2b40;
+    border-radius: 12px;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+}}
+
+.col-flow-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #1a2538;
+    flex-wrap: wrap;
+    gap: 8px;
+}}
+
+.col-flow-badge {{
+    font-family: var(--font-heading);
+    font-size: 14.5px;
+    font-weight: 800;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.3px;
+}}
+
+.col-flow-subtag {{
+    font-size: 11.5px;
+    color: var(--accent-emerald);
+    font-weight: 700;
+    background: rgba(16, 185, 129, 0.12);
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}}
+
+.vn-script-body {{
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}}
+
+.vn-script-para {{
+    background: #111a2c;
+    border: 1px solid #1e2c44;
+    border-left: 3px solid var(--accent-amber);
+    border-radius: 8px;
+    padding: 11px 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}}
+
+.vn-script-para:hover {{
+    background: #162238;
+    border-color: #2b3d5c;
+    transform: translateX(2px);
+}}
+
+.para-meta-line {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}}
+
+.para-timestamp-tag {{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-blue);
+    background: rgba(56, 189, 248, 0.1);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    padding: 1px 6px;
+    border-radius: 3px;
+}}
+
+.para-beat-label {{
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-amber);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}}
+
+.para-text {{
+    font-size: 14.5px;
+    color: #f8fafc;
+    line-height: 1.6;
+    font-weight: 500;
+    display: block;
+}}
+
+/* CỘT PHỤ (PHẢI): KHỐI NHỎ CHỮ BÉ XÍU TIẾNG ANH ĐỐI CHIẾU */
+.col-english-aside {{
+    width: 270px;
+    min-width: 250px;
+    background: #090e18;
+    border: 1px solid #162030;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+}}
+
+@media (max-width: 900px) {{
+    .col-english-aside {{
+        width: 100%;
+        min-width: 0;
+    }}
+}}
+
+.col-aside-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #141c2b;
+}}
+
+.aside-title {{
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}}
+
+.aside-note {{
+    font-size: 10px;
+    color: #475569;
+    font-style: italic;
+}}
+
+.en-lines-list {{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}}
+
+.en-line-item {{
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid #141d2c;
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}}
+
+.en-line-item:hover {{
+    background: rgba(255, 255, 255, 0.04);
+    border-color: #1e2c40;
+}}
+
+.en-time {{
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: #475569;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 2px;
+}}
+
+.en-text {{
+    font-size: 11px;
+    color: #64748b;
+    font-style: italic;
+    line-height: 1.45;
+}}
+
+/* Remake Mega Prompt Box (Accordion Closed Default) */
+.remake-prompt-card {{
+    background: linear-gradient(135deg, #0e1726 0%, #16243b 100%);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    border-radius: 10px;
+    margin-bottom: 20px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}}
+
+.prompt-accordion-header {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(15, 23, 42, 0.6);
+    gap: 10px;
+    transition: background 0.15s ease;
+}}
+
+.prompt-accordion-header:hover {{
+    background: rgba(30, 41, 59, 0.85);
+}}
+
+.prompt-header-left {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}}
+
+.remake-header-badge {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent-blue);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    font-size: 10.5px;
+    font-weight: 800;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}}
+
+.remake-accordion-title {{
+    font-family: var(--font-heading);
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #f8fafc;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}}
+
+.prompt-header-right {{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}}
+
+.copy-prompt-btn-compact {{
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--accent-blue);
+    color: #041324;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}}
+
+.copy-prompt-btn-compact:hover {{
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+}}
+
+.prompt-toggle-btn {{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 600;
+    white-space: nowrap;
+}}
+
+.toggle-icon {{
+    font-size: 9px;
+    transition: transform 0.2s ease;
+}}
+
+.prompt-accordion-body {{
+    padding: 14px 16px 16px 16px;
+    border-top: 1px solid rgba(56, 189, 248, 0.2);
+    background: rgba(8, 13, 22, 0.5);
+}}
+
+.remake-subtext {{
+    font-size: 12.5px;
+    color: #cbd5e1;
+    line-height: 1.5;
+    margin-bottom: 12px;
+}}
+
+.prompt-code-wrapper {{
+    position: relative;
+    background: #080d16;
+    border: 1px solid #1e2d45;
+    border-radius: 8px;
+    overflow: hidden;
+}}
+
+.prompt-code-toolbar {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #0f172a;
+    padding: 8px 14px;
+    border-bottom: 1px solid #1e2d45;
+}}
+
+.prompt-code-filename {{
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 600;
+}}
+
+.copy-prompt-btn {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--accent-blue);
+    color: #041324;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}}
+
+.copy-prompt-btn:hover {{
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}}
+
+.prompt-code-content {{
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: #cbd5e1;
+    line-height: 1.6;
+    padding: 14px;
+    max-height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}}
+
+@media (max-width: 640px) {{
+    .remake-accordion-title {{
+        font-size: 12px;
+    }}
+    .prompt-accordion-header {{
+        padding: 8px 10px;
+    }}
+}}
 </style>
 </head>
 <body>
@@ -1201,6 +1773,7 @@ video#mainPlayer {{
                 <button class="ctrl-btn" onclick="stepFrame(-1)">⏮ -1F</button>
                 <button class="ctrl-btn" onclick="stepFrame(1)">+1F ⏭</button>
                 <button class="ctrl-btn" onclick="toggleMute(this)">🔊 Tiếng</button>
+                <button class="ctrl-btn" onclick="togglePlayerFullscreen()" title="Toàn màn hình (Phím F hoặc nhấp đúp)" style="background:#fffbeb; color:#b45309; border-color:#fef3c7; font-weight:700;">⛶ Toàn màn hình</button>
             </div>
         </div>
     </div>
@@ -1210,6 +1783,7 @@ video#mainPlayer {{
             <div class="header-top-row">
                 <span class="genre-badge">DIRECTOR STORYBOARD BREAKDOWN</span>
                 <span style="font-size:12px; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700;">{shots_count} SHOTS &bull; {total_dur}</span>
+                <a href="https://ytuong.fedu.vn" target="_blank" style="color:var(--accent-blue); text-decoration:none; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:4px; margin-left:auto;">💡 Kho Ý Tưởng YTUONG HUB ↗</a>
             </div>
             <h1 class="report-title">{title}</h1>
             <div class="meta-tags-flex">
@@ -1223,6 +1797,8 @@ video#mainPlayer {{
             <h3 style="color:#fff; font-size:14px; margin-bottom:6px; font-weight:700;">🎯 TỔNG QUAN PHONG CÁCH THỊ GIÁC &amp; NGÔN NGỮ ĐIỆN ẢNH:</h3>
             <div>{overview_text}</div>
         </div>
+
+        {dialogue_section_html}
 
         <div class="action-toolbar">
             <div class="view-tabs-group">
@@ -1337,6 +1913,33 @@ function toggleMute(btn) {{
     if (btn) btn.innerText = player.muted ? '🔇 Tắt Tiếng' : '🔊 Tiếng';
 }}
 
+function togglePlayerFullscreen() {{
+    const v = document.getElementById('mainPlayer');
+    if (!v) return;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {{
+        if (v.requestFullscreen) {{
+            v.requestFullscreen().catch(() => {{}});
+        }} else if (v.webkitRequestFullscreen) {{
+            v.webkitRequestFullscreen();
+        }} else if (v.webkitEnterFullscreen) {{
+            v.webkitEnterFullscreen();
+        }}
+    }} else {{
+        if (document.exitFullscreen) {{
+            document.exitFullscreen().catch(() => {{}});
+        }} else if (document.webkitExitFullscreen) {{
+            document.webkitExitFullscreen();
+        }}
+    }}
+}}
+
+document.addEventListener('keydown', (e) => {{
+    if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {{
+        e.preventDefault();
+        togglePlayerFullscreen();
+    }}
+}});
+
 function switchView(view) {{
     const sb = document.getElementById('storyboardView');
     const grid = document.getElementById('gridView');
@@ -1395,11 +1998,86 @@ document.addEventListener('keydown', (e) => {{
         }}
     }}
 }});
+
+function togglePromptAccordion(headerEl) {{
+    const card = headerEl.closest('.remake-prompt-card');
+    if (!card) return;
+    const body = card.querySelector('.prompt-accordion-body');
+    const icon = card.querySelector('.toggle-icon');
+    const label = card.querySelector('.toggle-label');
+    if (!body) return;
+    const isCollapsed = (body.style.display === 'none' || getComputedStyle(body).display === 'none');
+    if (isCollapsed) {{
+        body.style.display = 'block';
+        if (icon) icon.textContent = '▲';
+        if (label) label.textContent = 'Thu gọn';
+    }} else {{
+        body.style.display = 'none';
+        if (icon) icon.textContent = '▼';
+        if (label) label.textContent = 'Mở xem';
+    }}
+}}
+
+function copyMegaPrompt(e, btn) {{
+    if (e && e.stopPropagation) e.stopPropagation();
+    const card = btn.closest('.remake-prompt-card');
+    const codeEl = card ? card.querySelector('.prompt-code-content') : document.getElementById('megaPromptText');
+    if (!codeEl) return;
+    const text = codeEl.innerText || codeEl.textContent;
+    navigator.clipboard.writeText(text).then(() => {{
+        const orig = btn.innerHTML;
+        btn.innerHTML = '✅ Đã chép!';
+        const oldBg = btn.style.background;
+        const oldColor = btn.style.color;
+        btn.style.background = '#10b981';
+        btn.style.color = '#fff';
+        setTimeout(() => {{
+            btn.innerHTML = orig;
+            btn.style.background = oldBg;
+            btn.style.color = oldColor;
+        }}, 2000);
+    }}).catch(err => {{
+        alert('Lỗi sao chép, bạn vui lòng bôi đen văn bản để copy nhé!');
+    }});
+}}
+
 </script>
 </body>
 </html>'''
 
-def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=None):
+def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=None, force=False, user_note=None):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    workspace_dir = "/Users/vietmac/Documents/CODE/Quản gia"
+    if workspace_dir not in sys.path:
+        sys.path.insert(0, workspace_dir)
+
+    try:
+        from user_note_parser import parse_user_note
+    except Exception:
+        parse_user_note = lambda t: {"matched_industry": None, "matched_style": None, "user_tags": []}
+
+    if not force:
+        try:
+            from check_scene_duplicate import find_in_scene
+            dup = find_in_scene(url_or_path)
+            if dup.get("exists"):
+                print(f"[!] Video đã có mặt ở trong scene.html: {dup.get('folder_name')}")
+                return {
+                    "success": True,
+                    "already_exists": True,
+                    "folder_name": dup.get("folder_name"),
+                    "report_url": dup.get("report_url"),
+                    "gdrive_folder_link": dup.get("gdrive_folder"),
+                    "scene_url": dup.get("scene_url"),
+                    "shots_count": dup.get("shots_count"),
+                    "creator": dup.get("creator"),
+                    "title": dup.get("title")
+                }
+        except Exception as e_dup:
+            print(f"[-] Lỗi check trùng scene.html: {e_dup}")
+
     if output_base is None:
         output_base = get_default_output_base()
     os.makedirs(output_base, exist_ok=True)
@@ -1603,13 +2281,15 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
 
     title_display = f"@{uploader_clean} - {title_clean.replace('_', ' ')}"
     overview_display = f"Tác phẩm điện ảnh ngắn gồm {len(shots_data)} phân cảnh được tính toán tỉ mỉ. Bố cục duy trì tỷ lệ khung hình dọc 9:16 sắc nét, khai thác ánh sáng tự nhiên kết hợp tông màu điện ảnh chuyên nghiệp."
+    detected_speech = extract_video_dialogue(video_dest)
     html_src = generate_mobile_first_report(
         title=title_display,
         creator=f"@{uploader_clean}",
         fname=f"{folder_name}.html",
         overview_text=overview_display,
         video_src=main_vid_url,
-        shots_data=shots_data
+        shots_data=shots_data,
+        speech_data=detected_speech
     )
 
     html_file = os.path.join(project_dir, f"{folder_name}.html")
@@ -1624,46 +2304,183 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         portal_repo = "/Users/vietmac/Documents/CODE/vietndj.github.io"
         scene_file = os.path.join(portal_repo, "scene.html")
         reports_dir = os.path.join(portal_repo, "reports")
-        if os.path.exists(scene_file):
-            print("[*] Đang đồng bộ lên fedu.vn/scene.html...")
+        if os.path.exists(reports_dir):
             dest_html_name = f"{folder_name}.html"
             dest_html_path = os.path.join(reports_dir, dest_html_name)
             shutil.copy2(html_file, dest_html_path)
             
-            with open(scene_file, "r", encoding="utf-8") as f:
-                scene_content = f.read()
-            match_portal = re.search(r"const portalData = (\[[\s\S]*?\]);", scene_content)
-            if match_portal:
-                p_data = json.loads(match_portal.group(1))
-                new_entry = {
-                    "id": folder_name,
-                    "folder_name": folder_name,
-                    "title_vi": folder_name.replace("IG_", "").replace("_", " "),
-                    "creator": f"@{uploader_clean}",
-                    "desc_vi": f"Báo cáo phân tích chuyên sâu ngôn ngữ điện ảnh, ánh sáng, góc máy và nhịp dựng {len(shots_data)} phân cảnh.",
-                    "key_tech": "Cinematic Lighting, Composition Mastery, Color Grading, Storyboard Rhythm",
-                    "ig_url": url_or_path if str(url_or_path).startswith("http") else "",
-                    "gdrive_folder": f_link if "http" in f_link else "",
-                    "gdrive_pdf": "",
-                    "main_vid_rel": main_vid_url,
-                    "main_html_rel": f"reports/{dest_html_name}",
-                    "main_pdf_rel": "",
-                    "shots_count": len(shots_data),
-                    "root_html_rel": f"reports/{dest_html_name}",
-                    "root_vid_rel": main_vid_url,
-                    "root_pdf_rel": "",
-                    "all_vids": all_vids
-                }
-                if not any(x.get("id") == folder_name for x in p_data):
-                    p_data.insert(0, new_entry)
-                    new_scene_json = json.dumps(p_data, ensure_ascii=False, indent=2)
-                    scene_content = scene_content[:match_portal.start(1)] + new_scene_json + scene_content[match_portal.end(1):]
-                    with open(scene_file, "w", encoding="utf-8") as f:
-                        f.write(scene_content)
-                    run_cmd(f'cd "{portal_repo}" && git add scene.html reports/ && git commit -m "feat: auto-add {folder_name}" && git push origin master')
-                    print("[*] Đã đẩy lên GitHub Pages thành công!")
+            # Phân loại lai ghép: Ghi chú người dùng + AI thị giác
+            note_info = parse_user_note(user_note or "")
+            user_ind = note_info.get("matched_industry")
+            user_style = note_info.get("matched_style")
+            user_tags = note_info.get("user_tags", [])
+
+            ai_tags = []
+            for s in shots_data:
+                an = s.get("analysis", {})
+                if an.get("shot_type") and an["shot_type"] not in ai_tags:
+                    ai_tags.append(an["shot_type"].split("(")[0].strip())
+                if an.get("lighting") and "Balanced" not in an["lighting"]:
+                    l_tag = an["lighting"].split("(")[0].strip()
+                    if l_tag not in ai_tags:
+                        ai_tags.append(l_tag)
+            if not ai_tags:
+                ai_tags = ["Cinematic Lighting", "Composition Mastery", "Visual Rhythm"]
+
+            merged_tags = []
+            for t in (user_tags + ai_tags):
+                if t and t.lower() not in [x.lower() for x in merged_tags]:
+                    merged_tags.append(t)
+
+            # Xác định Kiểu quay
+            if user_style:
+                final_style = user_style
+            else:
+                if detected_speech:
+                    final_style = {"id": "talking-head", "name": "Talking Head", "icon": "🗣️"}
+                elif len(shots_data) > 8:
+                    final_style = {"id": "chuyen-canh", "name": "Chuyển Cảnh (Transition)", "icon": "⚡"}
+                else:
+                    final_style = {"id": "dien-anh", "name": "Điện Ảnh (Cinematic)", "icon": "🎬"}
+
+            # Xác định Ngành nghề
+            if user_ind:
+                final_industry = user_ind
+            else:
+                corpus_check = f"{folder_name} {title_display} {overview_display}".lower()
+                if any(w in corpus_check for w in ["spa", "mụn", "da liễu", "thẩm mỹ", "y khoa"]):
+                    final_industry = {"id": "spa-lam-dep", "name": "Làm Đẹp & Spa / Y Tế", "icon": "💆"}
+                elif any(w in corpus_check for w in ["outfit", "lookbook", "thời trang", "fashion"]):
+                    final_industry = {"id": "thoi-trang", "name": "Thời Trang & Phụ Kiện", "icon": "👔"}
+                elif any(w in corpus_check for w in ["cafe", "ẩm thực", "f&b", "food", "nấu ăn"]):
+                    final_industry = {"id": "am-thuc", "name": "Ẩm Thực & F&B", "icon": "🍜"}
+                elif any(w in corpus_check for w in ["unboxing", "mở hộp", "camera", "máy ảnh", "gear", "ulanzi"]):
+                    final_industry = {"id": "cong-nghe", "name": "Công Nghệ & Thiết Bị", "icon": "📱"}
+                elif any(w in corpus_check for w in ["travel", "du lịch", "phong cảnh"]):
+                    final_industry = {"id": "du-lich", "name": "Du Lịch & Văn Hóa", "icon": "✈️"}
+                elif any(w in corpus_check for w in ["thương hiệu", "xây kênh", "creator", "khóa học"]):
+                    final_industry = {"id": "thuong-hieu", "name": "Thương Hiệu Cá Nhân & Dịch Vụ", "icon": "💼"}
+                elif any(w in corpus_check for w in ["gym", "chạy bộ", "running", "thể thao"]):
+                    final_industry = {"id": "the-thao", "name": "Thể Thao & Năng Động", "icon": "🏃"}
+                elif any(w in corpus_check for w in ["kiến trúc", "nội thất", "không gian", "nhà"]):
+                    final_industry = {"id": "kien-truc", "name": "Kiến Trúc & Không Gian Sống", "icon": "🏛️"}
+                elif any(w in corpus_check for w in ["ugc", "shopee", "tiktok shop", "quảng cáo"]):
+                    final_industry = {"id": "ugc", "name": "UGC", "icon": "📱"}
+                else:
+                    final_industry = {"id": "ky-thuat-quay", "name": "Kỹ Thuật Quay Dựng & Điện Ảnh", "icon": "🎯"}
+
+            # Cập nhật master_classifications.json vào cả 2 repo
+            master_repos = [
+                "/Users/vietmac/Documents/CODE/vietndj.github.io",
+                "/Users/vietmac/Documents/CODE/ytuong-fedu-vn"
+            ]
+            for m_repo in master_repos:
+                m_file = os.path.join(m_repo, "master_classifications.json")
+                if os.path.exists(m_file):
+                    try:
+                        with open(m_file, "r", encoding="utf-8") as mf:
+                            m_data = json.load(mf)
+                        class_entry = {
+                            "id": folder_name,
+                            "creator": f"@{uploader_clean}",
+                            "creator_name": uploader_clean.replace(".", " ").title(),
+                            "title": title_display,
+                            "shots_count": len(shots_data),
+                            "duration": f"{round(len(shots_data)*2.0, 1)}s",
+                            "shooting_style": final_style,
+                            "industry": final_industry,
+                            "purpose": user_note if user_note else f"Phân tích chuyên sâu ngôn ngữ điện ảnh và nghệ thuật thị giác cho @{uploader_clean}",
+                            "tech_tags": merged_tags,
+                            "logic_explanation": f"Ghi chú người dùng: {user_note}. Phân loại vào {final_industry['name']} • {final_style['name']}." if user_note else f"Tự động phân loại cấu trúc {final_style['name']} ngành {final_industry['name']}.",
+                            "is_excluded": False,
+                            "quick_takeaway": overview_display[:240],
+                            "country": {
+                                "id": "us_eu",
+                                "name": "Âu Mỹ",
+                                "en_name": "US & Europe",
+                                "flag": "🇺🇸/🇪🇺",
+                                "badge_color": "purple"
+                            }
+                        }
+                        m_data[folder_name] = class_entry
+                        m_data[shortcode] = class_entry
+                        with open(m_file, "w", encoding="utf-8") as mf:
+                            json.dump(m_data, mf, ensure_ascii=False, indent=2)
+                        print(f"[*] Đã cập nhật master_classifications.json tại {m_repo}")
+                    except Exception as e_m:
+                        print(f"[-] Lỗi cập nhật master_classifications.json tại {m_repo}: {e_m}")
+
+            if os.path.exists(scene_file):
+                print("[*] Đang đồng bộ lên fedu.vn/scene.html...")
+                with open(scene_file, "r", encoding="utf-8") as f:
+                    scene_content = f.read()
+                match_portal = re.search(r"const portalData = (\[[\s\S]*?\]);", scene_content)
+                if match_portal:
+                    try:
+                        clean_json_str = re.sub(r',\s*([\]\}])', r'\1', match_portal.group(1))
+                        p_data = json.loads(clean_json_str)
+                        new_entry = {
+                            "id": folder_name,
+                            "folder_name": folder_name,
+                            "title_vi": folder_name.replace("IG_", "").replace("_", " "),
+                            "creator": f"@{uploader_clean}",
+                            "desc_vi": f"Báo cáo phân tích chuyên sâu ngôn ngữ điện ảnh, ánh sáng, góc máy và nhịp dựng {len(shots_data)} phân cảnh.",
+                            "key_tech": " • ".join(merged_tags[:8]) if merged_tags else "Cinematic Lighting, Composition Mastery, Color Grading, Storyboard Rhythm",
+                            "ig_url": url_or_path if str(url_or_path).startswith("http") else "",
+                            "gdrive_folder": f_link if "http" in f_link else "",
+                            "gdrive_pdf": "",
+                            "main_vid_rel": main_vid_url,
+                            "main_html_rel": f"reports/{dest_html_name}",
+                            "main_pdf_rel": "",
+                            "shots_count": len(shots_data),
+                            "root_html_rel": f"reports/{dest_html_name}",
+                            "root_vid_rel": main_vid_url,
+                            "root_pdf_rel": "",
+                            "all_vids": all_vids
+                        }
+                        if not any(x.get("id") == folder_name for x in p_data):
+                            p_data.insert(0, new_entry)
+                            new_scene_json = json.dumps(p_data, ensure_ascii=False, indent=2)
+                            scene_content = scene_content[:match_portal.start(1)] + new_scene_json + scene_content[match_portal.end(1):]
+                            with open(scene_file, "w", encoding="utf-8") as f:
+                                f.write(scene_content)
+                    except Exception as ex_json:
+                        print(f"[-] Lỗi cập nhật portalData JSON: {ex_json}")
+            
+            # Tự động đồng bộ vào Kho Ý Tưởng YTUONG HUB
+            build_ideas_script = os.path.join(portal_repo, "build_ideas_bank.py")
+            if os.path.exists(build_ideas_script):
+                print("[*] Đang đồng bộ vào Kho Ý Tưởng YTUONG HUB...")
+                run_cmd(f'python3 "{build_ideas_script}"')
+
+            # Đồng bộ file sang thư mục ytuong-fedu-vn và tự động deploy Vercel
+            try:
+                ytuong_repo = "/Users/vietmac/Documents/CODE/ytuong-fedu-vn"
+                if os.path.exists(ytuong_repo):
+                    shutil.copy2(os.path.join(portal_repo, "ideas_data.js"), os.path.join(ytuong_repo, "ideas_data.js"))
+                    shutil.copy2(scene_file, os.path.join(ytuong_repo, "scene.html"))
+                    os.makedirs(os.path.join(ytuong_repo, "reports"), exist_ok=True)
+                    shutil.copy2(html_file, os.path.join(ytuong_repo, "reports", dest_html_name))
+                    
+                    # Re-build ideas_data.js trực tiếp tại ytuong-fedu-vn nếu có script
+                    build_yt = os.path.join(ytuong_repo, "build_ideas_bank.py")
+                    if os.path.exists(build_yt):
+                        run_cmd(f'python3 "{build_yt}"')
+                    
+                    # Tự động đẩy lên Vercel Production cho ytuong.fedu.vn
+                    code_v, out_v, err_v = run_cmd(f'cd "{ytuong_repo}" && vercel --prod --yes')
+                    if code_v == 0:
+                        print("[*] Đã tự động deploy YTUONG HUB lên Vercel Production thành công!")
+                    else:
+                        print(f"[-] Vercel deploy warning: {err_v}")
+            except Exception as e_yt:
+                print(f"[-] Lỗi đồng bộ sang ytuong-fedu-vn: {e_yt}")
+            
+            # Luôn đẩy báo cáo HTML, scene.html và YTUONG HUB lên GitHub
+            run_cmd(f'cd "{portal_repo}" && git add scene.html reports/ ytuong.html ideas_data.js curation_config.json master_classifications.json && git commit -m "feat: auto-add {folder_name} and sync YTUONG hub" && git push origin master')
+            print("[*] Đã đẩy lên GitHub Pages và đồng bộ YTUONG HUB thành công!")
     except Exception as e:
-        print(f"[-] Lỗi đồng bộ portal: {e}")
+        print(f"[-] Lỗi đồng bộ portal và YTUONG HUB: {e}")
 
     report_online_url = f"https://fedu.vn/reports/{folder_name}.html"
     return {
@@ -1671,14 +2488,34 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         "is_carousel": is_carousel,
         "folder_name": folder_name,
         "report_url": report_online_url,
-        "gdrive_folder_link": f_link if "http" in f_link else ""
+        "gdrive_folder_link": f_link if "http" in f_link else "",
+        "matched_industry": final_industry["name"] if "final_industry" in locals() else "Điện Ảnh",
+        "matched_style": final_style["name"] if "final_style" in locals() else "Điện Ảnh",
+        "tags": merged_tags if "merged_tags" in locals() else []
     }
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python analyze_and_upload.py <url_or_path> [brain_dir]")
+        print("Usage: python analyze_and_upload.py <url_or_path> [brain_dir] [--force] [--note <user_note>]")
         sys.exit(1)
-    url = sys.argv[1]
-    b_dir = sys.argv[2] if len(sys.argv) > 2 else None
-    result = process_video_or_carousel(url, brain_artifact_dir=b_dir)
+
+    import argparse
+    parser = argparse.ArgumentParser(description="Master Video & Carousel Analysis Pipeline")
+    parser.add_argument("url", help="URL video hoặc đường dẫn file cục bộ")
+    parser.add_argument("brain_dir", nargs="?", default=None, help="Thư mục Brain Artifacts của Antigravity")
+    parser.add_argument("--force", action="store_true", help="Bắt buộc phân tích lại dù đã có trong scene.html")
+    parser.add_argument("--note", "--user-note", dest="user_note", default=None, help="Ghi chú phân loại & tags từ anh Việt")
+
+    args, unknown = parser.parse_known_args()
+
+    # Kiểm tra thêm trong unknown args nếu người dùng truyền theo dạng cờ xen kẽ
+    force_val = args.force or ("--force" in unknown)
+    note_val = args.user_note
+    if not note_val:
+        for i, a in enumerate(unknown):
+            if a in ["--note", "--user-note"] and i + 1 < len(unknown):
+                note_val = unknown[i + 1]
+                break
+
+    result = process_video_or_carousel(args.url, brain_artifact_dir=args.brain_dir, force=force_val, user_note=note_val)
     print(json.dumps(result, ensure_ascii=False, indent=2))
