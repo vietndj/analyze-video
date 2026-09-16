@@ -2281,8 +2281,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
 
     title_display = f"@{uploader_clean} - {title_clean.replace('_', ' ')}"
     overview_display = f"Tác phẩm điện ảnh ngắn gồm {len(shots_data)} phân cảnh được tính toán tỉ mỉ. Bố cục duy trì tỷ lệ khung hình dọc 9:16 sắc nét, khai thác ánh sáng tự nhiên kết hợp tông màu điện ảnh chuyên nghiệp."
-    v_dest = video_dest if 'video_dest' in locals() else ""
-    detected_speech = extract_video_dialogue(v_dest)
+    detected_speech = extract_video_dialogue(video_dest)
     html_src = generate_mobile_first_report(
         title=title_display,
         creator=f"@{uploader_clean}",
@@ -2454,7 +2453,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                 print("[*] Đang đồng bộ vào Kho Ý Tưởng YTUONG HUB...")
                 run_cmd(f'python3 "{build_ideas_script}"')
 
-            # Đồng bộ file sang thư mục ytuong-fedu-vn và tự động deploy Vercel
+            # Đồng bộ file sang thư mục ytuong-fedu-vn và tự động deploy qua Cloudflare Pages (GitHub)
             try:
                 ytuong_repo = "/Users/vietmac/Documents/CODE/ytuong-fedu-vn"
                 if os.path.exists(ytuong_repo):
@@ -2463,32 +2462,30 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                     os.makedirs(os.path.join(ytuong_repo, "reports"), exist_ok=True)
                     shutil.copy2(html_file, os.path.join(ytuong_repo, "reports", dest_html_name))
                     
+                    # Cập nhật master classifications & curation config sang ytuong-fedu-vn
+                    shutil.copy2(os.path.join(portal_repo, "master_classifications.json"), os.path.join(ytuong_repo, "master_classifications.json"))
+                    shutil.copy2(os.path.join(portal_repo, "curation_config.json"), os.path.join(ytuong_repo, "curation_config.json"))
+
                     # Re-build ideas_data.js trực tiếp tại ytuong-fedu-vn nếu có script
                     build_yt = os.path.join(ytuong_repo, "build_ideas_bank.py")
                     if os.path.exists(build_yt):
                         run_cmd(f'python3 "{build_yt}"')
                     
-                    cf_cmd = f'cd "{ytuong_repo}" && rm -rf dist && mkdir dist && rsync -a --exclude=".git" --exclude="*.py" --exclude=".cfignore" --exclude=".env*" --exclude=".wrangler" --exclude=".vercel" . dist/ && source /Users/vietmac/.cloudflare_env && npx wrangler deploy --assets=dist --name ytuong-fedu-vn'
-                    code_v, out_v, err_v = run_cmd(cf_cmd)
+                    # Đẩy code lên GitHub để Cloudflare Pages tự động Deploy
+                    code_v, out_v, err_v = run_cmd(f'cd "{ytuong_repo}" && git add . && git commit -m "feat: auto-sync {folder_name}" ; git push origin main')
                     if code_v == 0:
-                        print("[*] Đã tự động deploy YTUONG HUB lên Cloudflare Pages thành công!")
+                        print("[*] Đã đẩy YTUONG HUB lên GitHub (Cloudflare Pages sẽ tự động build)!")
                     else:
-                        print(f"[-] Cloudflare deploy warning: {err_v}")
-                    
-                    # Git push LUÔN chạy dù deploy thành hay bại (tránh local drift)
-                    git_cmds_yt = [
-                        f'cd "{ytuong_repo}" && git add .',
-                        f'cd "{ytuong_repo}" && git commit -m "feat(auto): AI Analysis {folder_name}"',
-                        f'cd "{ytuong_repo}" && git push origin main'
-                    ]
-                    for c in git_cmds_yt:
-                        run_cmd(c)
+                        print(f"[-] YTUONG HUB push warning: {err_v}")
             except Exception as e_yt:
                 print(f"[-] Lỗi đồng bộ sang ytuong-fedu-vn: {e_yt}")
             
-            # Luôn đẩy báo cáo HTML, scene.html và YTUONG HUB lên GitHub
-            run_cmd(f'cd "{portal_repo}" && git add scene.html reports/ ytuong.html ideas_data.js curation_config.json master_classifications.json && git commit -m "feat: auto-add {folder_name} and sync YTUONG hub" && git push origin master')
-            print("[*] Đã đẩy lên GitHub Pages và đồng bộ YTUONG HUB thành công!")
+            # Luôn đẩy báo cáo HTML, scene.html và YTUONG HUB lên GitHub (vietndj.github.io)
+            code_p, out_p, err_p = run_cmd(f'cd "{portal_repo}" && git add scene.html reports/ ytuong.html ideas_data.js curation_config.json master_classifications.json && git commit -m "feat: auto-add {folder_name} and sync YTUONG hub" ; git push origin master')
+            if code_p == 0:
+                print("[*] Đã đẩy lên GitHub Pages và đồng bộ YTUONG HUB thành công!")
+            else:
+                print(f"[-] GitHub Pages push warning: {err_p}")
     except Exception as e:
         print(f"[-] Lỗi đồng bộ portal và YTUONG HUB: {e}")
 
