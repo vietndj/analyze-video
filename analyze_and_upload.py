@@ -30,7 +30,7 @@ def get_rclone_bin():
 
 RCLONE_EXE = get_rclone_bin()
 GDRIVE_REMOTE_BASE = "gdrive:Work/AI_Video_Analysis"
-R2_MEDIA_BASE = "https://pub-447bd44dfdac4938912655c855b8631c.r2.dev"
+R2_MEDIA_BASE = "https://media.fedu.vn"
 
 def sanitize_name(name):
     clean = re.sub(r'[\\/*?:"<>|]', "", name)
@@ -86,7 +86,7 @@ def get_post_metadata(url_or_path):
         if tt_item:
             return [tt_item]
 
-    cmd = f'yt-dlp --no-warnings --dump-json "{url_or_path}"'
+    cmd = f'yt-dlp --cookies-from-browser chrome --no-warnings --dump-json "{url_or_path}"'
     code, out, _ = run_cmd(cmd)
     items = []
     if code == 0 and out:
@@ -94,11 +94,18 @@ def get_post_metadata(url_or_path):
         for l in lines:
             try:
                 data = json.loads(l)
+                title = data.get("title", "video")
+                desc = data.get("description", "")
+                if (title.startswith("Video by") or title == "video") and desc:
+                    clean_lines = [cl.strip() for cl in desc.split('\n') if cl.strip() and not cl.strip().startswith('#')]
+                    if clean_lines:
+                        title = clean_lines[0][:50]
+                uploader = data.get("channel") or data.get("uploader_id") or data.get("uploader") or "creator"
                 items.append({
                     "id": data.get("id", "video"),
-                    "uploader": data.get("uploader") or data.get("uploader_id") or data.get("channel") or "creator",
-                    "title": data.get("title", "video"),
-                    "description": data.get("description", ""),
+                    "uploader": uploader,
+                    "title": title,
+                    "description": desc,
                     "url": data.get("webpage_url", url_or_path),
                     "duration": data.get("duration"),
                     "is_carousel": len(lines) > 1
@@ -549,7 +556,7 @@ Sau khi tôi chọn, hãy xuất bản ngay 3 PHƯƠNG ÁN BỐ TRÍ CÚ MÁY (G
         </div>
         """
 
-    return f'''<!DOCTYPE html>
+    html_content = f'''<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
@@ -1757,15 +1764,15 @@ video#mainPlayer {{
 <div class="app-container">
     <div class="video-sidebar-col">
         <div class="video-player-container">
-            <video id="mainPlayer" controls autoplay muted playsinline preload="auto" loop></video>
+            <video id="mainPlayer" src="{video_src}" controls autoplay muted playsinline preload="auto" loop></video>
         </div>
         <div class="video-controls-panel">
             <div class="current-status-bar">
                 <span class="status-tag" id="shotStatusTag">🎬 Phân cảnh: Toàn bộ video</span>
-                <a id="directVidLink" href="{video_src}" target="_blank" style="color:var(--accent-blue); font-size:11.5px; text-decoration:none;">Tệp gốc ↗</a>
+                <a id="directVidLink" href="{video_src}" target="_blank" style="color:var(--accent-blue); font-size:0.75rem; text-decoration:none;">Tệp gốc ↗</a>
             </div>
             <div class="speed-buttons-row">
-                <span style="font-size:11.5px; color:#94a3b8; font-weight:700; margin-right:4px;">Tốc độ:</span>
+                <span style="font-size:0.75rem; color:#94a3b8; font-weight:700; margin-right:4px;">Tốc độ:</span>
                 <button class="ctrl-btn" onclick="setSpeed(0.25, this)">0.25x</button>
                 <button class="ctrl-btn" onclick="setSpeed(0.5, this)">0.5x</button>
                 <button class="ctrl-btn active" onclick="setSpeed(1.0, this)">1.0x</button>
@@ -1782,8 +1789,8 @@ video#mainPlayer {{
         <div class="report-header-banner">
             <div class="header-top-row">
                 <span class="genre-badge">DIRECTOR STORYBOARD BREAKDOWN</span>
-                <span style="font-size:12px; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700;">{shots_count} SHOTS &bull; {total_dur}</span>
-                <a href="https://ytuong.fedu.vn" target="_blank" style="color:var(--accent-blue); text-decoration:none; font-size:12px; font-weight:700; display:inline-flex; align-items:center; gap:4px; margin-left:auto;">💡 Kho Ý Tưởng YTUONG HUB ↗</a>
+                <span style="font-size:0.75rem; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700;">{shots_count} SHOTS &bull; {total_dur}</span>
+                <a href="https://ytuong.fedu.vn" target="_blank" style="color:var(--accent-blue); text-decoration:none; font-size:0.75rem; font-weight:700; display:inline-flex; align-items:center; gap:4px; margin-left:auto;">💡 Kho Ý Tưởng YTUONG HUB ↗</a>
             </div>
             <h1 class="report-title">{title}</h1>
             <div class="meta-tags-flex">
@@ -1794,7 +1801,7 @@ video#mainPlayer {{
         </div>
 
         <div class="overview-card">
-            <h3 style="color:#fff; font-size:14px; margin-bottom:6px; font-weight:700;">🎯 TỔNG QUAN PHONG CÁCH THỊ GIÁC &amp; NGÔN NGỮ ĐIỆN ẢNH:</h3>
+            <h3 style="color:#fff; font-size:1rem; margin-bottom:6px; font-weight:700;">🎯 TỔNG QUAN PHONG CÁCH THỊ GIÁC &amp; NGÔN NGỮ ĐIỆN ẢNH.</h3>
             <div>{overview_text}</div>
         </div>
 
@@ -1832,7 +1839,7 @@ video#mainPlayer {{
 
 <div id="lightboxModal" onclick="closeLightbox()">
     <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
-    <img id="lightboxImg" src="" onclick="event.stopPropagation()" />
+    <img id="lightboxImg" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>" onclick="event.stopPropagation()" />
     <div id="lightboxCaption"></div>
 </div>
 
@@ -2044,6 +2051,8 @@ function copyMegaPrompt(e, btn) {{
 </script>
 </body>
 </html>'''
+    html_content = re.sub(r'font-size\s*:\s*(\d+(?:\.\d+)?)\s*px', lambda m: f"font-size: {round(float(m.group(1))/16, 3)}rem" if float(m.group(1)) < 15.5 else m.group(0), html_content)
+    return html_content
 
 def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=None, force=False, user_note=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -2112,12 +2121,12 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         slides_dir = os.path.join(project_dir, "carousel_slides")
         os.makedirs(slides_dir, exist_ok=True)
         
-        dl_cmd = f'yt-dlp -o "{slides_dir}/slide_%(autonumber)02d.%(ext)s" "{url_or_path}"'
+        dl_cmd = f'yt-dlp --cookies-from-browser chrome -o "{slides_dir}/slide_%(autonumber)02d.%(ext)s" "{url_or_path}"'
         run_cmd(dl_cmd)
 
         video_files = sorted([f for f in os.listdir(slides_dir) if f.endswith(".mp4")])
         r2_sub = f"videos/carousel_slides/{folder_name}"
-        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/{r2_sub}/"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/{r2_sub}/"')
 
         for i, vf in enumerate(video_files):
             s_num = i + 1
@@ -2165,7 +2174,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         if all_vids:
             main_vid_url = all_vids[0]["rel_url"]
 
-        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/images/{folder_name}/" --include "*.jpg"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/" --include "*.jpg"')
 
     else:
         print(f"[*] Phát hiện Video đơn lẻ. Đang tải và bóc tách Shots OpenCV...")
@@ -2179,7 +2188,17 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             print(f"[*] Đang tải video trực tiếp qua play_url...")
             run_cmd(f'curl -sL -A "Mozilla/5.0" -o "{video_dest}" "{items[0]["play_url"]}"')
         else:
-            run_cmd(f'yt-dlp --no-warnings "{url_or_path}" -o "{video_dest}" --force-overwrites')
+            run_cmd(f'yt-dlp --cookies-from-browser chrome --no-warnings "{url_or_path}" -o "{video_dest}" --force-overwrites')
+
+        if not os.path.exists(video_dest) or os.path.getsize(video_dest) == 0:
+            for tf in os.listdir("/tmp"):
+                if shortcode in tf and tf.endswith(".mp4"):
+                    shutil.copy2(os.path.join("/tmp", tf), video_dest)
+                    print(f"[*] Đã tận dụng tệp video tải sẵn từ /tmp: {tf}")
+                    break
+
+        if not os.path.exists(video_dest) or os.path.getsize(video_dest) == 0:
+            raise RuntimeError(f"[-] Không thể tải hoặc mở video: {url_or_path}")
 
         # Standardize video to H.264 (yuv420p) + AAC + Faststart for universal Safari & Mobile compatibility
         std_video = os.path.join(project_dir, f"{shortcode}_std.mp4")
@@ -2273,14 +2292,31 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         v_enc = urllib.parse.quote(f"{shortcode}.mp4")
         main_vid_url = f"{R2_MEDIA_BASE}/videos/{v_enc}"
         all_vids.append({"name": "Video Master", "rel_url": main_vid_url})
-        run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "r2:vietndjmedia/videos/"')
-        run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "r2:vietndjmedia/images/{folder_name}/"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "gdrive:Work/AI_Video_Analysis/videos/"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/"')
 
     with open(os.path.join(project_dir, "shot_info.json"), "w", encoding="utf-8") as f:
         json.dump(shots_data, f, ensure_ascii=False, indent=2)
 
     title_display = f"@{uploader_clean} - {title_clean.replace('_', ' ')}"
-    overview_display = f"Tác phẩm điện ảnh ngắn gồm {len(shots_data)} phân cảnh được tính toán tỉ mỉ. Bố cục duy trì tỷ lệ khung hình dọc 9:16 sắc nét, khai thác ánh sáng tự nhiên kết hợp tông màu điện ảnh chuyên nghiệp."
+    # Trích xuất điểm sáng thực chiến then chốt, loại bỏ hoàn toàn văn mẫu máy móc
+    hook_takeaway = ""
+    if shots_data and len(shots_data) > 0:
+        first_shot = shots_data[0]
+        hook_takeaway = first_shot.get("takeaway") or first_shot.get("headline") or first_shot.get("subject_action") or ""
+    key_takeaway = ""
+    if shots_data and len(shots_data) > 1:
+        second_shot = shots_data[1]
+        key_takeaway = second_shot.get("takeaway") or second_shot.get("headline") or second_shot.get("subject_action") or ""
+
+    if user_note and not any(k in user_note for k in ["Instagram Liked", "Video,", "by @", "shared", "Shared", "of 18"]):
+        overview_display = user_note
+    elif hook_takeaway and key_takeaway and hook_takeaway != key_takeaway:
+        overview_display = f"⚡ {hook_takeaway} ➔ {key_takeaway}"
+    elif hook_takeaway:
+        overview_display = f"⚡ {hook_takeaway}"
+    else:
+        overview_display = f"Ý tưởng quay dựng {len(shots_data)} phân cảnh chuẩn điện ảnh 9:16."
     detected_speech = extract_video_dialogue(video_dest)
     html_src = generate_mobile_first_report(
         title=title_display,
@@ -2462,9 +2498,37 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                     os.makedirs(os.path.join(ytuong_repo, "reports"), exist_ok=True)
                     shutil.copy2(html_file, os.path.join(ytuong_repo, "reports", dest_html_name))
                     
-                    # Cập nhật master classifications & curation config sang ytuong-fedu-vn
-                    shutil.copy2(os.path.join(portal_repo, "master_classifications.json"), os.path.join(ytuong_repo, "master_classifications.json"))
-                    shutil.copy2(os.path.join(portal_repo, "curation_config.json"), os.path.join(ytuong_repo, "curation_config.json"))
+                    # Cập nhật master classifications & curation config (bảo toàn cấu hình tinh chỉnh tại ytuong-fedu-vn)
+                    ytuong_m = os.path.join(ytuong_repo, "master_classifications.json")
+                    portal_m = os.path.join(portal_repo, "master_classifications.json")
+                    if os.path.exists(portal_m):
+                        try:
+                            with open(portal_m, "r", encoding="utf-8") as pmf:
+                                p_data = json.load(pmf)
+                            y_data = {}
+                            if os.path.exists(ytuong_m):
+                                with open(ytuong_m, "r", encoding="utf-8") as ymf:
+                                    y_data = json.load(ymf)
+                            # Giữ lại các trường fedu_optimization và title_vi tinh chỉnh từ ytuong_repo
+                            for k, v in p_data.items():
+                                if k not in y_data:
+                                    y_data[k] = v
+                                else:
+                                    # Cập nhật thông tin mới nhất nhưng giữ nguyên fedu_optimization
+                                    if "fedu_optimization" in y_data[k] and "fedu_optimization" not in v:
+                                        v["fedu_optimization"] = y_data[k]["fedu_optimization"]
+                                    if y_data[k].get("title") and not y_data[k].get("title", "").startswith("@"):
+                                        v["title"] = y_data[k]["title"]
+                                    y_data[k] = v
+                            with open(ytuong_m, "w", encoding="utf-8") as ymf:
+                                json.dump(y_data, ymf, ensure_ascii=False, indent=2)
+                        except Exception as e_m_sync:
+                            print(f"[-] Warning sync master_classifications: {e_m_sync}")
+
+                    # Bảo toàn curation_config.json từ ytuong-fedu-vn sang portal_repo
+                    yt_curation = os.path.join(ytuong_repo, "curation_config.json")
+                    if os.path.exists(yt_curation):
+                        shutil.copy2(yt_curation, os.path.join(portal_repo, "curation_config.json"))
 
                     # Re-build ideas_data.js trực tiếp tại ytuong-fedu-vn nếu có script
                     build_yt = os.path.join(ytuong_repo, "build_ideas_bank.py")
