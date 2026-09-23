@@ -219,6 +219,26 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     run_cmd(f'python3 "{YTUONG_REPO}/build_ideas_bank.py"')
     print("[+] Đã build lại ideas_bank trên YTUONG HUB")
 
+    # Deploy Cloudflare Pages
+    cf_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    if not cf_token:
+        cf_cred_file = os.path.expanduser("~/.gemini/config/cloudflare_credentials.json")
+        if os.path.exists(cf_cred_file):
+            try:
+                with open(cf_cred_file, "r", encoding="utf-8") as cff:
+                    cf_data = json.load(cff)
+                    cf_token = cf_data.get("api_token")
+            except Exception:
+                pass
+    token_env = f'CLOUDFLARE_API_TOKEN="{cf_token}" ' if cf_token else ""
+    deploy_code, deploy_out, deploy_err = run_cmd(
+        f'cd "{YTUONG_REPO}" && {token_env}npx wrangler pages deploy dist --project-name ytuong-fedu-vn-pages'
+    )
+    if deploy_code == 0:
+        print("[+] Đã deploy thành công lên Cloudflare Pages (ytuong.fedu.vn)!")
+    else:
+        print(f"[-] Deploy Cloudflare Pages cảnh báo/lỗi: {deploy_err or deploy_out}")
+
     # Auto push
     run_cmd(f'cd "{YTUONG_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis with YouTube for {folder_name}" && git push origin main')
     run_cmd(f'cd "{PORTAL_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis with YouTube for {folder_name}" && git push origin master')
