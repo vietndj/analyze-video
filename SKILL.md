@@ -136,6 +136,11 @@ Mỗi phân cảnh (Shot) khi phân tích và xuất bản báo cáo BẮT BUỘ
     - `[Mở Thư Mục Google Drive ↗](https://drive.google.com/...)`
     - `[Mở Cổng Tra Cứu Điện Ảnh Trực Tuyến ↗](https://vietndj.github.io/scene.html)`
 
-## 9. TỰ ĐỘNG BẮN THÔNG BÁO VỀ TELEGRAM (@nova0410_bot)
-- Chỉ gửi tin nhắn văn bản tóm tắt kết quả kèm link thư mục Drive & Link Cổng Tra Cứu:
-  `python3 /Users/vietmac/Documents/CODE/Quản\ gia/telegram_notify.py --msg "🎬 <b>HOÀN TẤT PHÂN TÍCH ĐIỆN ẢNH: [Tên_Video]</b>\n━━━━━━━━━━━━━━━━━━\n📁 <b>Thư mục Google Drive:</b> [Link_Folder]\n🌐 <b>Xem Báo Cáo Tương Tác:</b> https://vietndj.github.io/reports/[Tên_Báo_Cáo].html\n✨ Đã bóc tách [N] phân cảnh chuẩn logic đắt giá, mô tả đối tượng, đánh giá 2 chiều và bài học thực chiến!"`
+## 9. THÔNG BÁO VỀ TELEGRAM (@phantichVideoInsta_bot HOẶC @viet_vni_bot) - BẮT BUỘC TRUYỀN --cid
+- Mặc định: KHÔNG tự ý bắn Telegram nếu anh Việt chat trực tiếp trên Antigravity, trừ khi anh Việt yêu cầu gửi Telegram / báo qua bot hoặc nhiệm vụ được kích hoạt từ daemon (@phantichVideoInsta_bot).
+- **BẮT BUỘC CÓ CỜ `--cid "$ANTIGRAVITY_CONVERSATION_ID"`**: Để tin nhắn Telegram tự động gắn link clickable `💬 Mở Antigravity` (dẫn tới `https://fedu.vn/course/open.html?c={CID}`), giúp anh Việt trên iPhone/Mac nhấp 1 chạm là nhảy thẳng vào đúng luồng hội thoại tương ứng trên Antigravity IDE.
+- **Câu lệnh chuẩn**:
+  ```bash
+  python3 "/Users/vietmac/Documents/CODE/Quản gia/telegram_notify.py" --bot analyze --msg "🎬 <b>HOÀN TẤT PHÂN TÍCH ĐIỆN ẢNH: [Tên_Video]</b>\n━━━━━━━━━━━━━━━━━━\n📁 <b>Thư mục Google Drive:</b> [Link_Folder]\n🌐 <b>Xem Báo Cáo Tương Tác:</b> https://ytuong.fedu.vn/reports/[Tên_Báo_Cáo].html\n✨ Đã bóc tách [N] phân cảnh chuẩn logic đắt giá, mô tả đối tượng, đánh giá 2 chiều và bài học thực chiến!" --cid "$ANTIGRAVITY_CONVERSATION_ID"
+  ```
+- *Lưu ý*: Nếu chạy từ bot cảnh báo alert (@viet_vni_bot), đổi `--bot analyze` thành `--bot alert`. Luôn luôn giữ `--cid "$ANTIGRAVITY_CONVERSATION_ID"`.
