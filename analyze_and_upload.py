@@ -2142,8 +2142,11 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             mid_path = os.path.join(slides_dir, mid_name)
             if ret:
                 cv2.imwrite(mid_path, frame)
+                webp_name = f"slide_{s_num:02d}_mid.webp"
+                cv2.imwrite(os.path.join(slides_dir, webp_name), frame)
                 if brain_shots_dir:
                     cv2.imwrite(os.path.join(brain_shots_dir, mid_name), frame)
+                    cv2.imwrite(os.path.join(brain_shots_dir, webp_name), frame)
             cap.release()
 
             analysis = analyze_shot_visuals(mid_path, shot_idx=s_num, total_shots=len(video_files))
@@ -2174,7 +2177,9 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         if all_vids:
             main_vid_url = all_vids[0]["rel_url"]
 
-        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/" --include "*.jpg"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/" --include "*.jpg" --include "*.webp"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/images/{folder_name}/" --include "*.jpg" --include "*.webp"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/{r2_sub}/" --include "*.mp4"')
 
     else:
         print(f"[*] Phát hiện Video đơn lẻ. Đang tải và bóc tách Shots OpenCV...")
@@ -2260,8 +2265,11 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                 m_name = f"shot_{sid:02d}_mid.jpg"
                 m_path = os.path.join(shots_dir, m_name)
                 cv2.imwrite(m_path, frame)
+                w_name = f"shot_{sid:02d}_mid.webp"
+                cv2.imwrite(os.path.join(shots_dir, w_name), frame)
                 if brain_shots_dir:
                     cv2.imwrite(os.path.join(brain_shots_dir, m_name), frame)
+                    cv2.imwrite(os.path.join(brain_shots_dir, w_name), frame)
             
             if curr == s_en:
                 m_path = os.path.join(shots_dir, f"shot_{sid:02d}_mid.jpg")
@@ -2294,6 +2302,8 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         all_vids.append({"name": "Video Master", "rel_url": main_vid_url})
         run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "gdrive:Work/AI_Video_Analysis/videos/"')
         run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "r2:vietndjmedia/images/{folder_name}/"')
+        run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "r2:vietndjmedia/videos/"')
 
     with open(os.path.join(project_dir, "shot_info.json"), "w", encoding="utf-8") as f:
         json.dump(shots_data, f, ensure_ascii=False, indent=2)
@@ -2315,9 +2325,11 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         overview_display = f"⚡ {hook_takeaway} ➔ {key_takeaway}"
     elif hook_takeaway:
         overview_display = f"⚡ {hook_takeaway}"
+    if is_carousel:
+        first_slide_vid = os.path.join(slides_dir, video_files[0]) if video_files else ""
+        detected_speech = extract_video_dialogue(first_slide_vid) if first_slide_vid else {"has_speech": False, "transcription": "", "segments": []}
     else:
-        overview_display = f"Ý tưởng quay dựng {len(shots_data)} phân cảnh chuẩn điện ảnh 9:16."
-    detected_speech = extract_video_dialogue(video_dest)
+        detected_speech = extract_video_dialogue(video_dest)
     html_src = generate_mobile_first_report(
         title=title_display,
         creator=f"@{uploader_clean}",
