@@ -659,6 +659,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
     shots_data = []
     main_vid_url = ""
     all_vids = []
+    youtube_url = None
 
     if is_carousel:
         print(f"[*] Phát hiện bài Carousel gồm {len(items)} videos/slides. Đang tải và phân tích...")
@@ -723,7 +724,6 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
 
         run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/" --include "*.jpg" --include "*.webp"')
         run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/images/{folder_name}/" --include "*.jpg" --include "*.webp"')
-        run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "r2:vietndjmedia/{r2_sub}/" --include "*.mp4"')
 
     else:
         print(f"[*] Phát hiện Video đơn lẻ. Đang tải và bóc tách Shots OpenCV...")
@@ -847,7 +847,27 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "gdrive:Work/AI_Video_Analysis/videos/"')
         run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "gdrive:Work/AI_Video_Analysis/images/{folder_name}/"')
         run_cmd(f'"{RCLONE_EXE}" copy "{shots_dir}" "r2:vietndjmedia/images/{folder_name}/"')
-        run_cmd(f'"{RCLONE_EXE}" copy "{video_dest}" "r2:vietndjmedia/videos/"')
+        # ZERO VIDEO ON R2: CẤM upload mp4 lên R2. Chỉ upload YouTube + Drive.
+
+        # Tự động upload video lên YouTube Sabakiz
+        youtube_url = None
+        try:
+            sys.path.append("/Users/vietmac/Documents/CODE/AI Course/.agents/skills/analyze-video-02/scripts")
+            from extract_storyboard_02 import upload_youtube_pipeline
+            meta = {
+                "title": title_clean.replace('_', ' '),
+                "uploader": uploader_clean,
+                "webpage_url": f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else "",
+                "duration_seconds": int(dur),
+                "aspect_ratio": "9:16"
+            }
+            print(f"[*] Đang tự động upload video lên YouTube Sabakiz: {video_dest}...")
+            yt_res = upload_youtube_pipeline(video_dest, meta)
+            if yt_res and yt_res.get("watch_url"):
+                youtube_url = yt_res.get("short_url") or yt_res.get("watch_url")
+                print(f"[+] Đã upload YouTube thành công: {youtube_url}")
+        except Exception as e_yt:
+            print(f"[-] Bỏ qua upload YouTube: {e_yt}")
 
     with open(os.path.join(project_dir, "shot_info.json"), "w", encoding="utf-8") as f:
         json.dump(shots_data, f, ensure_ascii=False, indent=2)
@@ -881,7 +901,8 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         overview_text=overview_display,
         video_src=main_vid_url,
         shots_data=shots_data,
-        speech_data=detected_speech
+        speech_data=detected_speech,
+        youtube_url=youtube_url
     )
 
     html_file = os.path.join(project_dir, f"{folder_name}.html")
@@ -994,6 +1015,18 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                                 "badge_color": "purple"
                             }
                         }
+                        if youtube_url:
+                            yt_id = None
+                            if "youtu.be/" in youtube_url:
+                                yt_id = youtube_url.split("youtu.be/")[-1].split("?")[0]
+                            elif "watch?v=" in youtube_url:
+                                yt_id = youtube_url.split("watch?v=")[-1].split("&")[0]
+                            elif "/embed/" in youtube_url:
+                                yt_id = youtube_url.split("/embed/")[-1].split("?")[0]
+                            if yt_id:
+                                class_entry["youtube_id"] = yt_id
+                                class_entry["youtube_url"] = f"https://youtu.be/{yt_id}"
+                                class_entry["youtube_embed"] = f"https://www.youtube.com/embed/{yt_id}"
                         m_data[folder_name] = class_entry
                         m_data[shortcode] = class_entry
                         with open(m_file, "w", encoding="utf-8") as mf:

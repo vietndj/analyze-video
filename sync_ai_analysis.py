@@ -81,6 +81,58 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
     creator_url = f"https://www.instagram.com/{uploader}/"
 
+    # Tự động tìm kiếm hoặc upload YouTube nếu chưa có youtube_url
+    if not youtube_url:
+        for r in [YTUONG_REPO, PORTAL_REPO]:
+            cfg_path = os.path.join(r, "master_classifications.json")
+            if os.path.exists(cfg_path):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        cfgs = json.load(f)
+                    for k in [shortcode, folder_name]:
+                        if k in cfgs and cfgs[k].get("youtube_url"):
+                            youtube_url = cfgs[k].get("youtube_url")
+                            break
+                except Exception:
+                    pass
+            if youtube_url:
+                break
+
+    if not youtube_url:
+        # Tự động tìm file video và upload lên YouTube kênh Sabakiz
+        vid_candidates = [
+            os.path.join(package_dir, f"{shortcode}.mp4"),
+            os.path.join(package_dir, "master.mp4")
+        ]
+        chosen_vid = None
+        for c in vid_candidates:
+            if os.path.exists(c):
+                chosen_vid = c
+                break
+        if not chosen_vid:
+            for f in os.listdir(package_dir):
+                if f.endswith(".mp4") and not f.startswith("slide_"):
+                    chosen_vid = os.path.join(package_dir, f)
+                    break
+        if chosen_vid and os.path.exists(chosen_vid):
+            try:
+                sys.path.append("/Users/vietmac/Documents/CODE/AI Course/.agents/skills/analyze-video-02/scripts")
+                from extract_storyboard_02 import upload_youtube_pipeline
+                meta = {
+                    "title": title_raw.replace('_', ' '),
+                    "uploader": uploader,
+                    "webpage_url": source_url,
+                    "duration_seconds": 60,
+                    "aspect_ratio": "9:16"
+                }
+                print(f"[*] Đang tự động upload lên YouTube Sabakiz: {chosen_vid}...")
+                yt_res = upload_youtube_pipeline(chosen_vid, meta)
+                if yt_res and yt_res.get("watch_url"):
+                    youtube_url = yt_res.get("short_url") or yt_res.get("watch_url")
+                    print(f"[+] Đã upload YouTube thành công: {youtube_url}")
+            except Exception as e:
+                print(f"[-] Không thể upload YouTube tự động: {e}")
+
     # Xử lý overview
     if not overview:
         if shots_data and len(shots_data) > 0:
@@ -127,12 +179,8 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfgs = json.load(f)
-            target_key = None
-            for k in [shortcode, folder_name]:
-                if k in cfgs:
-                    target_key = k
-                    break
-            if target_key:
+            target_keys = [k for k in [shortcode, folder_name] if k in cfgs]
+            for target_key in target_keys:
                 entry = cfgs[target_key]
                 if industry:
                     if isinstance(industry, dict):
@@ -150,6 +198,19 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
                     entry["quick_takeaway"] = overview
                 if purpose:
                     entry["purpose"] = purpose
+                if youtube_url:
+                    yt_id = None
+                    if "youtu.be/" in youtube_url:
+                        yt_id = youtube_url.split("youtu.be/")[-1].split("?")[0]
+                    elif "watch?v=" in youtube_url:
+                        yt_id = youtube_url.split("watch?v=")[-1].split("&")[0]
+                    elif "/embed/" in youtube_url:
+                        yt_id = youtube_url.split("/embed/")[-1].split("?")[0]
+                    if yt_id:
+                        entry["youtube_id"] = yt_id
+                        entry["youtube_url"] = f"https://youtu.be/{yt_id}"
+                        entry["youtube_embed"] = f"https://www.youtube.com/embed/{yt_id}"
+            if target_keys:
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     json.dump(cfgs, f, ensure_ascii=False, indent=2)
                 print(f"[+] Đã cập nhật master_classifications.json tại {r}")
@@ -159,8 +220,8 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     print("[+] Đã build lại ideas_bank trên YTUONG HUB")
 
     # Auto push
-    run_cmd(f'cd "{YTUONG_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis for {folder_name}" && git push origin main')
-    run_cmd(f'cd "{PORTAL_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis for {folder_name}" && git push origin master')
+    run_cmd(f'cd "{YTUONG_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis with YouTube for {folder_name}" && git push origin main')
+    run_cmd(f'cd "{PORTAL_REPO}" && git add . && git commit -m "fix(sync): sync real AI analysis with YouTube for {folder_name}" && git push origin master')
     print("[+] Đã tự động push cả 2 repo lên GitHub!")
     return True
 
