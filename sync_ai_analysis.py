@@ -78,8 +78,12 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     main_vid_url = f"https://media.fedu.vn/videos/{shortcode}.mp4"
     
     # Derive URLs
-    source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
-    creator_url = f"https://www.instagram.com/{uploader}/"
+    if shortcode == "oU2DB" or "lazada" in folder_name.lower():
+        source_url = "https://s.lazada.vn/s.oU2DB?c=w"
+        creator_url = "https://www.lazada.vn/shop/ulanzi-flagship-store/"
+    else:
+        source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
+        creator_url = f"https://www.instagram.com/{uploader}/"
 
     # Tự động tìm kiếm hoặc upload YouTube nếu chưa có youtube_url
     if not youtube_url:
@@ -198,6 +202,9 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
                     entry["quick_takeaway"] = overview
                 if purpose:
                     entry["purpose"] = purpose
+                entry["shots_count"] = len(shots_data)
+                if shots_data:
+                    entry["duration"] = f"{round(sum(s.get('duration', 0) for s in shots_data), 1)}s"
                 if youtube_url:
                     yt_id = None
                     if "youtu.be/" in youtube_url:

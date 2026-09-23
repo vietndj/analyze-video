@@ -815,16 +815,17 @@ function getCandidateUrls(src) {
 const candidateUrls = getCandidateUrls(rawVideoSrc);
 let candidateIdx = 0;
 const player = document.getElementById('mainPlayer');
+window.isYtMuted = false;
 
 function loadVideoCandidate() {
-    if (!player || candidateIdx >= candidateUrls.length) return;
+    if (!player || player.tagName === 'IFRAME' || candidateIdx >= candidateUrls.length) return;
     player.src = candidateUrls[candidateIdx];
     var link = document.getElementById('directVidLink');
     if (link) link.href = candidateUrls[candidateIdx];
     player.load();
 }
 
-if (player) {
+if (player && player.tagName !== 'IFRAME') {
     player.onerror = function() {
         candidateIdx++;
         if (candidateIdx < candidateUrls.length) loadVideoCandidate();
@@ -840,13 +841,26 @@ function playShot(startTime, endTime, label) {
         var endTxt = currentEndTime ? ' - ' + currentEndTime.toFixed(2) + 's' : '';
         tag.innerText = (label || 'Phân cảnh') + ': [' + startTime.toFixed(2) + 's' + endTxt + ']';
     }
-    player.currentTime = startTime;
-    var p = player.play();
-    if (p !== undefined) {
-        p.catch(function() {
-            player.muted = true;
-            player.play().catch(function() {});
-        });
+    if (player.tagName === 'IFRAME') {
+        player.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func: 'seekTo',
+            args: [startTime, true]
+        }), '*');
+        player.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func: 'playVideo',
+            args: []
+        }), '*');
+    } else {
+        player.currentTime = startTime;
+        var p = player.play();
+        if (p !== undefined) {
+            p.catch(function() {
+                player.muted = true;
+                player.play().catch(function() {});
+            });
+        }
     }
     document.querySelectorAll('.shot-card').forEach(function(c) { c.classList.remove('active-playing'); });
     var cards = document.querySelectorAll('.shot-card');
@@ -862,21 +876,42 @@ function playShot(startTime, endTime, label) {
 }
 
 function setSpeed(speed, btn) {
-    if (player) player.playbackRate = speed;
+    if (!player) return;
+    if (player.tagName === 'IFRAME') {
+        player.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func: 'setPlaybackRate',
+            args: [speed]
+        }), '*');
+    } else {
+        player.playbackRate = speed;
+    }
     document.querySelectorAll('.speed-row .ctrl-btn').forEach(function(b) { b.classList.remove('active'); });
     if (btn) btn.classList.add('active');
 }
 
 function stepFrame(frames) {
     if (!player) return;
-    player.pause();
-    player.currentTime += (frames * (1/30));
+    if (player.tagName !== 'IFRAME') {
+        player.pause();
+        player.currentTime += (frames * (1/30));
+    }
 }
 
 function toggleMute(btn) {
     if (!player) return;
-    player.muted = !player.muted;
-    if (btn) btn.innerText = player.muted ? 'Tắt tiếng' : 'Âm thanh';
+    if (player.tagName === 'IFRAME') {
+        window.isYtMuted = !window.isYtMuted;
+        player.contentWindow.postMessage(JSON.stringify({
+            event: 'command',
+            func: window.isYtMuted ? 'mute' : 'unMute',
+            args: []
+        }), '*');
+        if (btn) btn.innerText = window.isYtMuted ? 'Tắt tiếng' : 'Âm thanh';
+    } else {
+        player.muted = !player.muted;
+        if (btn) btn.innerText = player.muted ? 'Tắt tiếng' : 'Âm thanh';
+    }
 }
 
 function togglePlayerFullscreen() {

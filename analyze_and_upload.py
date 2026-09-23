@@ -71,6 +71,60 @@ def fetch_tiktok_meta(url):
         print(f"[-] TikTok API error: {e}")
     return None
 
+def fetch_lazada_meta(url):
+    try:
+        import asyncio
+        import re
+        from playwright.async_api import async_playwright
+        
+        async def _extract(target_url):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = await context.new_page()
+                video_url = None
+                def handle_response(response):
+                    nonlocal video_url
+                    u = response.url
+                    if ('.mp4' in u or 'video_target' in u) and 'lazcdn.com' in u:
+                        video_url = u
+
+                page.on('response', handle_response)
+                await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+                title = await page.title()
+                for _ in range(12):
+                    if video_url:
+                        break
+                    try:
+                        await page.click('div[class*="video"], span[class*="video"], [data-spm*="video"]', timeout=1000)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+                await browser.close()
+                return title, video_url
+
+        title, video_url = asyncio.run(_extract(url))
+        if video_url:
+            clean_title = re.sub(r'^(?:Lazada\.vn\s*[-|:]\s*|Ulanzi\s*\|\s*)', '', title, flags=re.I).strip()
+            if not clean_title or clean_title == "Lazada":
+                clean_title = "Ulanzi Easy Open Portable Aluminum Trigopod"
+            shortcode = url.split('/s.')[-1].split('?')[0] if '/s.' in url else "oU2DB"
+            return {
+                "id": shortcode,
+                "uploader": "ulanzi",
+                "title": clean_title,
+                "description": f"Video giới thiệu {clean_title} trên Lazada",
+                "url": url,
+                "duration": 15,
+                "play_url": video_url,
+                "is_carousel": False
+            }
+    except Exception as e:
+        print(f"[-] Lazada API error: {e}")
+    return None
+
 def get_post_metadata(url_or_path):
     if os.path.isfile(url_or_path):
         stem = Path(url_or_path).stem
@@ -86,6 +140,11 @@ def get_post_metadata(url_or_path):
         tt_item = fetch_tiktok_meta(url_or_path)
         if tt_item:
             return [tt_item]
+
+    if "lazada.vn" in url_or_path or "s.lazada" in url_or_path:
+        lz_item = fetch_lazada_meta(url_or_path)
+        if lz_item:
+            return [lz_item]
 
     cmd = f'yt-dlp --cookies-from-browser chrome --no-warnings --dump-json "{url_or_path}"'
     code, out, _ = run_cmd(cmd)
@@ -330,7 +389,7 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
             yt_id = youtube_url.split("watch?v=")[-1].split("&")[0]
         elif "/embed/" in youtube_url:
             yt_id = youtube_url.split("/embed/")[-1].split("?")[0]
-        video_player_html = f'<iframe id="mainPlayer" src="https://www.youtube.com/embed/{yt_id}?rel=0&modestbranding=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;aspect-ratio:9/16;border-radius:12px;"></iframe>'
+        video_player_html = f'<iframe id="mainPlayer" src="https://www.youtube.com/embed/{yt_id}?enablejsapi=1&rel=0&modestbranding=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;aspect-ratio:9/16;border-radius:12px;"></iframe>'
     else:
         video_player_html = f'<video id="mainPlayer" src="{_esc(video_src)}" controls autoplay muted playsinline preload="auto" loop style="width:100%;aspect-ratio:9/16;border-radius:12px;background:#000;"></video>'
 
@@ -857,8 +916,8 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             meta = {
                 "title": title_clean.replace('_', ' '),
                 "uploader": uploader_clean,
-                "webpage_url": f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else "",
-                "duration_seconds": int(dur),
+                "webpage_url": items[0].get("url") if items and items[0].get("url") else (f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""),
+                "duration_seconds": int(duration_sec),
                 "aspect_ratio": "9:16"
             }
             print(f"[*] Đang tự động upload video lên YouTube Sabakiz: {video_dest}...")
@@ -902,6 +961,8 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         video_src=main_vid_url,
         shots_data=shots_data,
         speech_data=detected_speech,
+        source_url=items[0].get("url") if items else "",
+        creator_url="https://www.lazada.vn/shop/ulanzi" if "ulanzi" in uploader_clean else f"https://www.instagram.com/{uploader_clean}/",
         youtube_url=youtube_url
     )
 
