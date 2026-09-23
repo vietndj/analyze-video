@@ -268,7 +268,7 @@ def extract_video_dialogue(video_path):
         print(f"[-] Dialogue transcription skipped: {e}")
         return None
 
-def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None):
+def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None, custom_headline=None, script_axis=None, industry=None, shooting_style=None):
     """Sinh mã HTML Mobile-First Responsive cao cấp với cấu trúc phân tích cảnh logic chuyên sâu"""
     shots_count = len(shots_data)
     total_dur = f"{shots_data[-1]['end_time']:.2f}s" if shots_data else "N/A"
@@ -555,13 +555,30 @@ Sau khi tôi chọn, hãy xuất bản ngay 3 PHƯƠNG ÁN BỐ TRÍ CÚ MÁY (G
             </div>
         </div>
         """
+    display_title = custom_headline if custom_headline else title
+    
+    genre_badges = []
+    if industry: genre_badges.append(f'<span class="genre-badge" style="background:rgba(56, 189, 248, 0.15); color:var(--accent-blue); border-color:rgba(56,189,248,0.3);">{industry}</span>')
+    if shooting_style: genre_badges.append(f'<span class="genre-badge" style="background:rgba(245, 158, 11, 0.15); color:var(--accent-amber); border-color:rgba(245,158,11,0.3);">{shooting_style}</span>')
+    badges_html = " ".join(genre_badges) if genre_badges else '<span class="genre-badge">DIRECTOR STORYBOARD BREAKDOWN</span>'
+
+    script_axis_html = ""
+    if script_axis:
+        script_axis_html = f"""
+        <div class="script-axis-card" style="background:#0e1420; border:1px solid #1e293b; border-radius:12px; padding:16px; margin-bottom:20px;">
+            <h3 style="color:var(--accent-blue); font-size:0.95rem; margin-bottom:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:6px;">
+                <span style="font-size:1.2rem;">📍</span> TRỤC KỊCH BẢN 3 NHỊP
+            </h3>
+            <div style="color:#e2e8f0; font-size:1rem; line-height:1.6; font-weight:500;">{script_axis}</div>
+        </div>
+        """
 
     html_content = f'''<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>{title}</title>
+<title>{display_title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -1788,17 +1805,21 @@ video#mainPlayer {{
     <div class="content-scroll-col">
         <div class="report-header-banner">
             <div class="header-top-row">
-                <span class="genre-badge">DIRECTOR STORYBOARD BREAKDOWN</span>
-                <span style="font-size:0.75rem; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700;">{shots_count} SHOTS &bull; {total_dur}</span>
+                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                    {badges_html}
+                </div>
+                <span style="font-size:0.75rem; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700; margin-left:12px;">{shots_count} SHOTS &bull; {total_dur}</span>
                 <a href="https://ytuong.fedu.vn" target="_blank" style="color:var(--accent-blue); text-decoration:none; font-size:0.75rem; font-weight:700; display:inline-flex; align-items:center; gap:4px; margin-left:auto;">💡 Kho Ý Tưởng YTUONG HUB ↗</a>
             </div>
-            <h1 class="report-title">{title}</h1>
+            <h1 class="report-title">{display_title}</h1>
             <div class="meta-tags-flex">
                 <span>Tác giả: <strong>{creator}</strong></span>
                 <span>Tệp: <strong>{fname}</strong></span>
                 <span>Trực quan: <strong>9:16 Vertical HD</strong></span>
             </div>
         </div>
+
+        {script_axis_html}
 
         <div class="overview-card">
             <h3 style="color:#fff; font-size:1rem; margin-bottom:6px; font-weight:700;">🎯 TỔNG QUAN PHONG CÁCH THỊ GIÁC &amp; NGÔN NGỮ ĐIỆN ẢNH.</h3>

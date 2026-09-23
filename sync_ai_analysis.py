@@ -30,7 +30,7 @@ def run_cmd(cmd):
     res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res.returncode, res.stdout.strip(), res.stderr.strip()
 
-def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, style=None, tags=None, overview=None, purpose=None):
+def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, style=None, tags=None, overview=None, purpose=None, custom_headline=None, script_axis=None):
     if os.path.isdir(folder_name_or_path):
         package_dir = folder_name_or_path
         folder_name = os.path.basename(folder_name_or_path.rstrip("/\\"))
@@ -94,7 +94,11 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
         overview_text=overview,
         video_src=main_vid_url,
         shots_data=shots_data,
-        speech_data=None
+        speech_data=None,
+        custom_headline=custom_headline,
+        script_axis=script_axis,
+        industry=industry,
+        shooting_style=style
     )
 
     # Ghi file HTML cục bộ
@@ -162,6 +166,8 @@ if __name__ == "__main__":
     parser.add_argument("--tags", help="Danh sách tags phân cách bằng dấu phẩy")
     parser.add_argument("--overview", help="Đoạn trích xuất cốt lõi overview")
     parser.add_argument("--purpose", help="Mục đích cốt lõi")
+    parser.add_argument("--custom-headline", help="Custom AI headline")
+    parser.add_argument("--script-axis", help="TRỤC KỊCH BẢN 3 NHỊP")
 
     args = parser.parse_args()
     sync_analysis(
@@ -171,5 +177,7 @@ if __name__ == "__main__":
         style=args.style,
         tags=args.tags,
         overview=args.overview,
-        purpose=args.purpose
+        purpose=args.purpose,
+        custom_headline=args.custom_headline,
+        script_axis=args.script_axis
     )
