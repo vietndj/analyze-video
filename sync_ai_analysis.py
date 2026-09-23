@@ -30,7 +30,7 @@ def run_cmd(cmd):
     res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     return res.returncode, res.stdout.strip(), res.stderr.strip()
 
-def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, style=None, tags=None, overview=None, purpose=None, custom_headline=None, script_axis=None):
+def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, style=None, tags=None, overview=None, purpose=None, custom_headline=None, script_axis=None, youtube_url=None):
     if os.path.isdir(folder_name_or_path):
         package_dir = folder_name_or_path
         folder_name = os.path.basename(folder_name_or_path.rstrip("/\\"))
@@ -104,7 +104,8 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
         industry=industry,
         shooting_style=style,
         source_url=source_url,
-        creator_url=creator_url
+        creator_url=creator_url,
+        youtube_url=youtube_url
     )
 
     # Ghi file HTML cục bộ
@@ -174,6 +175,7 @@ if __name__ == "__main__":
     parser.add_argument("--purpose", help="Mục đích cốt lõi")
     parser.add_argument("--custom-headline", help="Custom AI headline")
     parser.add_argument("--script-axis", help="TRỤC KỊCH BẢN 3 NHỊP")
+    parser.add_argument("--youtube-url", help="URL YouTube để nhúng iframe")
 
     args = parser.parse_args()
     sync_analysis(
@@ -185,5 +187,6 @@ if __name__ == "__main__":
         overview=args.overview,
         purpose=args.purpose,
         custom_headline=args.custom_headline,
-        script_axis=args.script_axis
+        script_axis=args.script_axis,
+        youtube_url=args.youtube_url
     )
