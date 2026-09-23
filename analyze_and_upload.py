@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import re
+import html
 import shutil
 import subprocess
 from pathlib import Path
@@ -268,11 +269,72 @@ def extract_video_dialogue(video_path):
         print(f"[-] Dialogue transcription skipped: {e}")
         return None
 
-def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None, custom_headline=None, script_axis=None, industry=None, shooting_style=None):
-    """Sinh mã HTML Mobile-First Responsive cao cấp với cấu trúc phân tích cảnh logic chuyên sâu"""
+
+def _load_report_template():
+    """Load report_template.html from same directory as this script."""
+    tmpl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_template.html")
+    if not os.path.exists(tmpl_path):
+        raise FileNotFoundError(f"Template not found: {tmpl_path}")
+    with open(tmpl_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def _esc(text):
+    """Escape HTML entities in user-provided text."""
+    if not text:
+        return ""
+    return html.escape(str(text), quote=True)
+
+def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None, custom_headline=None, script_axis=None, industry=None, shooting_style=None, source_url=None, creator_url=None, youtube_url=None):
+    """Sinh mã HTML Light Theme chuẩn 30ngayviral cho báo cáo bóc tách video."""
     shots_count = len(shots_data)
     total_dur = f"{shots_data[-1]['end_time']:.2f}s" if shots_data else "N/A"
     
+    display_title = custom_headline if custom_headline else title
+    
+    # Derive URLs from creator name if not provided
+    clean_creator = creator.lstrip("@") if creator else "creator"
+    if not creator_url:
+        creator_url = f"https://www.instagram.com/{clean_creator}/"
+    if not source_url:
+        # Try to extract shortcode from folder name
+        parts = fname.replace(".html", "").split("_") if fname else []
+        shortcode = parts[2] if len(parts) > 2 else ""
+        source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else creator_url
+
+    # === BADGES ===
+    badges_parts = []
+    if industry:
+        badges_parts.append(f'<span class="badge">{_esc(industry)}</span>')
+    if shooting_style:
+        badges_parts.append(f'<span class="badge badge-alt">{_esc(shooting_style)}</span>')
+    if not badges_parts:
+        badges_parts.append('<span class="badge">STORYBOARD BREAKDOWN</span>')
+    badges_html = " ".join(badges_parts)
+
+    # === SCRIPT AXIS ===
+    script_axis_html = ""
+    if script_axis:
+        script_axis_html = f"""
+        <section class="axis-card">
+            <h3 class="axis-title">TRỤC KỊCH BẢN 3 NHỊP</h3>
+            <div class="axis-content">{_esc(script_axis)}</div>
+        </section>"""
+
+    # === VIDEO PLAYER ===
+    if youtube_url:
+        # Extract video ID from YouTube URL
+        yt_id = ""
+        if "youtu.be/" in youtube_url:
+            yt_id = youtube_url.split("youtu.be/")[-1].split("?")[0]
+        elif "watch?v=" in youtube_url:
+            yt_id = youtube_url.split("watch?v=")[-1].split("&")[0]
+        elif "/embed/" in youtube_url:
+            yt_id = youtube_url.split("/embed/")[-1].split("?")[0]
+        video_player_html = f'<iframe id="mainPlayer" src="https://www.youtube.com/embed/{yt_id}?rel=0&modestbranding=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen style="width:100%;aspect-ratio:9/16;border-radius:12px;"></iframe>'
+    else:
+        video_player_html = f'<video id="mainPlayer" src="{_esc(video_src)}" controls autoplay muted playsinline preload="auto" loop style="width:100%;aspect-ratio:9/16;border-radius:12px;background:#000;"></video>'
+
+    # === SHOT CARDS (COMPACT) ===
     cards_html = []
     grid_html = []
     drawer_html = []
@@ -284,1796 +346,257 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
         dur = f"{s.get('duration', et - st):.2f}s"
         img_url = s.get("img_url") or s.get("img_mid") or ""
         
-        # Lấy các trường dữ liệu mới chuẩn hóa
+        # Get analysis fields
         an = s.get("analysis", {})
-        headline = s.get("headline") or an.get("headline") or s.get("title_vi") or f"Phân đoạn #{sid:02d}"
-        subject_action = s.get("subject_action") or an.get("subject_action") or s.get("visual_breakdown") or "Mô tả đối tượng và diễn biến trong phân cảnh."
-        comp_good = s.get("composition_good") or an.get("composition_good") or s.get("composition") or "Bố cục chặt chẽ, tạo điểm hút mắt tự nhiên."
-        comp_bad = s.get("composition_bad") or an.get("composition_bad") or "Cần lưu ý kiểm soát các chi tiết rìa khung hình trên màn hình dọc."
-        takeaway = s.get("takeaway") or an.get("takeaway") or s.get("cinematography_notes") or "Ứng dụng kỹ thuật bố cục để định hướng ánh nhìn người xem."
+        headline_text = s.get("headline") or an.get("headline") or s.get("title_vi") or f"Phân đoạn #{sid:02d}"
+        subject_action = s.get("subject_action") or an.get("subject_action") or ""
+        comp_good = s.get("composition_good") or an.get("composition_good") or s.get("composition") or ""
+        comp_bad = s.get("composition_bad") or an.get("composition_bad") or ""
+        takeaway = s.get("takeaway") or an.get("takeaway") or s.get("cinematography_notes") or ""
         
-        shot_type = s.get("shot_type") or an.get("shot_type") or "Medium Shot"
-        lighting = s.get("lighting") or an.get("lighting") or s.get("color_grade") or "Ánh sáng tự nhiên"
-        location = s.get("location") or an.get("location") or "Bối cảnh thực địa"
-        trans_tech = s.get("transition_technique") or an.get("transition") or "Chuyển tiếp theo nhịp cắt"
+        shot_type = s.get("shot_type") or an.get("shot_type") or ""
+        lighting = s.get("lighting") or an.get("lighting") or s.get("color_grade") or ""
+        location = s.get("location") or an.get("location") or ""
+        trans_tech = s.get("transition_technique") or an.get("transition") or ""
+        
+        # Key insight = takeaway (the single most important sentence)
+        key_insight = takeaway if takeaway else subject_action
+        
         st_title = f"SHOT {sid:02d}"
-
+        
+        # COMPACT SHOT CARD
         cards_html.append(f'''
         <div class="shot-card" id="shot-card-{sid}">
-            <div class="shot-media-col">
-                <div class="shot-thumb-wrap" onclick="playShot({st}, {et}, '{st_title}')">
-                    <img src="{img_url}" alt="{st_title}" class="shot-img" loading="lazy" />
-                    <div class="play-overlay">
-                        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                    </div>
-                    <button class="zoom-btn" onclick="event.stopPropagation(); openLightbox('{img_url}', '{st_title} [{st}s - {et}s] • {headline}')">🔍</button>
-                    <span class="thumb-time-badge">{st:.2f}s - {et:.2f}s</span>
-                </div>
+            <div class="shot-thumb" onclick="playShot({st}, {et}, '{st_title}')">
+                <img src="{img_url}" alt="{st_title}" loading="lazy" />
+                <div class="shot-play-icon"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+                <span class="shot-time-badge">{st:.1f}s – {et:.1f}s</span>
             </div>
-            <div class="shot-info-col">
-                <div class="shot-card-header">
-                    <div class="shot-title-wrap">
-                        <span class="shot-badge-num">SHOT {sid:02d}</span>
-                        <h4 class="shot-heading">{headline}</h4>
+            <div class="shot-body">
+                <div class="shot-head">
+                    <span class="shot-num">{st_title}</span>
+                    <span class="shot-dur">{dur}</span>
+                </div>
+                <h4 class="shot-headline">{_esc(headline_text)}</h4>
+                <p class="shot-insight">{_esc(key_insight)}</p>
+                <details class="shot-details">
+                    <summary>Chi tiết kỹ thuật ▸</summary>
+                    <div class="shot-meta-grid">
+                        {f'<div class="meta-item"><span class="meta-label">Bối cảnh</span><span class="meta-val">{_esc(location)}</span></div>' if location else ''}
+                        {f'<div class="meta-item"><span class="meta-label">Góc máy</span><span class="meta-val">{_esc(shot_type)}</span></div>' if shot_type else ''}
+                        {f'<div class="meta-item"><span class="meta-label">Ánh sáng</span><span class="meta-val">{_esc(lighting)}</span></div>' if lighting else ''}
+                        {f'<div class="meta-item"><span class="meta-label">Chuyển cảnh</span><span class="meta-val">{_esc(trans_tech)}</span></div>' if trans_tech else ''}
                     </div>
-                    <button class="time-jump-btn" onclick="playShot({st}, {et}, '{st_title}')">
-                        ▶ {st:.2f}s ➔ {et:.2f}s ({dur})
-                    </button>
-                </div>
-
-                <div class="shot-narrative-box">
-                    <span class="narrative-tag">📝 Mô tả đối tượng &amp; Diễn biến:</span>
-                    <span class="narrative-text">{subject_action}</span>
-                </div>
-
-                <div class="critique-container">
-                    <div class="critique-box critique-good">
-                        <div class="critique-title">✅ Điểm Sáng Thị Giác (Hiệu quả):</div>
-                        <div class="critique-content">{comp_good}</div>
-                    </div>
-                    <div class="critique-box critique-bad">
-                        <div class="critique-title">⚠️ Hạn Chế / Cần Lưu Ý:</div>
-                        <div class="critique-content">{comp_bad}</div>
-                    </div>
-                </div>
-
-                <div class="takeaway-box">
-                    <div class="takeaway-title">💡 Bài Học Đúc Kết Thực Chiến:</div>
-                    <div class="takeaway-content">{takeaway}</div>
-                </div>
-
-                <div class="props-list">
-                    <div class="prop-item"><span class="prop-label">📍 Bối cảnh:</span> <span class="prop-val">{location}</span></div>
-                    <div class="prop-item"><span class="prop-label">🎥 Góc &amp; Tiêu cự:</span> <span class="prop-val">{shot_type}</span></div>
-                    <div class="prop-item"><span class="prop-label">💡 Ánh sáng &amp; Màu:</span> <span class="prop-val">{lighting}</span></div>
-                    <div class="prop-item"><span class="prop-label">🔄 Chuyển cảnh:</span> <span class="prop-val">{trans_tech}</span></div>
-                </div>
-
-                <div class="tags-row">
-                    <span class="tag-pill">9:16 Vertical</span>
-                    <span class="tag-pill">Shot {sid:02d}</span>
-                    <span class="tag-pill">⏱ {dur}</span>
-                </div>
+                    {f'<div class="critique-good">{_esc(comp_good)}</div>' if comp_good else ''}
+                    {f'<div class="critique-warn">{_esc(comp_bad)}</div>' if comp_bad else ''}
+                    {f'<div class="shot-narrative">{_esc(subject_action)}</div>' if subject_action and subject_action != key_insight else ''}
+                </details>
             </div>
-        </div>
-        ''')
+        </div>''')
         
+        # GRID ITEM
         grid_html.append(f'''
-        <div class="grid-card" onclick="playShot({st}, {et}, '{st_title}')">
+        <div class="grid-item" onclick="playShot({st}, {et}, '{st_title}')">
             <div class="grid-img-wrap">
                 <img src="{img_url}" alt="{st_title}" loading="lazy" />
-                <div class="grid-play-icon">▶</div>
-                <button class="grid-zoom-btn" onclick="event.stopPropagation(); openLightbox('{img_url}', '{st_title} [{st}s - {et}s] • {headline}')">🔍</button>
-                <div class="grid-badge-top">SHOT {sid:02d}</div>
-                <div class="grid-badge-bottom">{st:.1f}s - {et:.1f}s</div>
+                <span class="grid-num">{st_title}</span>
+                <span class="grid-time">{st:.1f}s – {et:.1f}s</span>
+                <button class="grid-zoom" onclick="event.stopPropagation(); openLightbox('{img_url}', '{st_title} • {_esc(headline_text)}')">⊕</button>
             </div>
-            <div class="grid-title-snippet">{headline}</div>
-        </div>
-        ''')
+            <div class="grid-title">{_esc(headline_text[:40])}</div>
+        </div>''')
         
+        # DRAWER ITEM
         drawer_html.append(f'''
         <div class="drawer-item" onclick="jumpToShot({sid}, {st}, {et}, '{st_title}')">
-            <div class="drawer-thumb">
-                <img src="{img_url}" alt="{st_title}" loading="lazy" />
-            </div>
+            <div class="drawer-thumb"><img src="{img_url}" alt="{st_title}" loading="lazy" /></div>
             <div class="drawer-info">
-                <div class="drawer-shot-title">SHOT {sid:02d}</div>
-                <div class="drawer-shot-headline">{headline[:42]}...</div>
-                <div class="drawer-shot-time">⏱ {st:.2f}s - {et:.2f}s</div>
+                <div class="drawer-shot-num">{st_title}</div>
+                <div class="drawer-shot-hl">{_esc(headline_text[:42])}</div>
+                <div class="drawer-shot-time">{st:.2f}s – {et:.2f}s</div>
             </div>
-            <div class="drawer-play-arrow">▶</div>
-        </div>
-        ''')
-        
+            <div class="drawer-arrow">▶</div>
+        </div>''')
+
     all_cards = "\n".join(cards_html)
     all_grid = "\n".join(grid_html)
     all_drawer = "\n".join(drawer_html)
 
+    # === DIALOGUE SECTION (keep existing logic, restyle for light theme) ===
     dialogue_section_html = ""
-    # PHÂN LOẠI 3 NHÁNH THỰC CHIẾN THEO CHUẨN ANH VIỆT:
-    # Nhánh 1: Video có lời thoại kể chuyện (Spoken / Storytelling)
     if speech_data and len(speech_data) > 0:
         vn_items = []
         en_items = []
         for idx, item in enumerate(speech_data):
-            st = item.get("start", 0.0)
-            et = item.get("end", 0.0)
+            s_start = item.get("start", 0.0)
+            s_end = item.get("end", 0.0)
             en_txt = item.get("en", "").strip()
             vi_txt = item.get("vi", "").strip() or en_txt
             beat_label = item.get("beat") or f"Phân đoạn #{idx+1:02d}"
             
             vn_items.append(f"""
-                    <div class="vn-script-para" onclick="playShot({st}, {et}, '{beat_label}')">
-                        <div class="para-meta-line">
-                            <span class="para-timestamp-tag">{st:.2f}s</span>
-                            <span class="para-beat-label">{beat_label}</span>
-                        </div>
-                        <span class="para-text">"{vi_txt}"</span>
-                    </div>
-            """)
+                <div class="vn-para" onclick="playShot({s_start}, {s_end}, '{_esc(beat_label)}')">
+                    <span class="vn-time">{s_start:.2f}s</span>
+                    <span class="vn-beat">{_esc(beat_label)}</span>
+                    <span class="vn-text">"{_esc(vi_txt)}"</span>
+                </div>""")
             
             en_items.append(f"""
-                    <div class="en-line-item" onclick="playShot({st}, {et}, 'ORIGINAL')">
-                        <span class="en-time">{st:.2f}s</span>
-                        <div class="en-text">"{en_txt}"</div>
-                    </div>
-            """)
+                <div class="en-line" onclick="playShot({s_start}, {s_end}, 'ORIGINAL')">
+                    <span class="en-time">{s_start:.2f}s</span>
+                    <span class="en-text">"{_esc(en_txt)}"</span>
+                </div>""")
 
-        all_vn_rows = "\n".join(vn_items)
-        all_en_rows = "\n".join(en_items)
+        all_vn = "\n".join(vn_items)
+        all_en = "\n".join(en_items)
 
         dialogue_section_html = f"""
-        <!-- BẢNG KỊCH BẢN THOẠI 2 CỘT (TIẾNG VIỆT ĐỌC LIỀN MẠCH + TIẾNG ANH KHỐI NHỎ BÊN CẠNH) -->
-        <div class="dialogue-container-2col">
-            <!-- CỘT CHÍNH (TRÁI): TIẾNG VIỆT ĐỌC LIỀN MẠCH KHÔNG NGẮT QUÃNG -->
-            <div class="col-vietnamese-flow">
-                <div class="col-flow-header">
-                    <div class="col-flow-badge">🎙️ KỊCH BẢN LỜI THOẠI (BẢN DỊCH THỰC CHIẾN)</div>
-                    <span class="col-flow-subtag">Đọc liền một mạch • Chuẩn 4 nhịp giữ chân</span>
+        <section class="dialogue-section">
+            <div class="dialogue-col-main">
+                <div class="dialogue-header">
+                    <span class="dialogue-badge">KỊCH BẢN LỜI THOẠI</span>
+                    <span class="dialogue-sub">Bản dịch thực chiến</span>
                 </div>
-                <div class="vn-script-body">
-                    {all_vn_rows}
-                </div>
+                <div class="dialogue-body">{all_vn}</div>
             </div>
-
-            <!-- CỘT PHỤ (PHẢI): KHỐI NHỎ CHỮ BÉ XÍU ĐỐI SOÁT TIẾNG ANH -->
-            <div class="col-english-aside">
-                <div class="col-aside-header">
-                    <span class="aside-title">ORIGINAL TRANSCRIPT</span>
-                    <span class="aside-note">Phụ / Đối chiếu</span>
+            <div class="dialogue-col-aside">
+                <div class="dialogue-aside-header">
+                    <span>ORIGINAL TRANSCRIPT</span>
                 </div>
-                <div class="en-lines-list">
-                    {all_en_rows}
-                </div>
+                <div class="dialogue-aside-body">{all_en}</div>
             </div>
-        </div>
+        </section>"""
 
-        <!-- KHỐI PROMPT ÁNH XẠ SANG NGÀNH NGHỀ (GEMINI MEGA PROMPT ACCORDION ĐÓNG MẶC ĐỊNH) -->
+        # Add mega prompt accordion for spoken videos
+        dialogue_section_html += f"""
         <div class="remake-prompt-card" id="remakePromptCard">
             <div class="prompt-accordion-header" onclick="togglePromptAccordion(this)">
-                <div class="prompt-header-left">
-                    <span class="remake-header-badge">✨ KỊCH BẢN STU</span>
-                    <span class="remake-accordion-title">Ánh xạ kịch bản này sang ngành nghề của bạn (Gemini Prompt)</span>
+                <div class="prompt-left">
+                    <span class="prompt-badge">KỊCH BẢN STU</span>
+                    <span class="prompt-title">Ánh xạ kịch bản sang ngành nghề của bạn</span>
                 </div>
-                <div class="prompt-header-right">
-                    <button class="copy-prompt-btn-compact" onclick="copyMegaPrompt(event, this)">📋 Sao chép</button>
-                    <div class="prompt-toggle-btn">
+                <div class="prompt-right">
+                    <button class="prompt-copy-btn" onclick="copyMegaPrompt(event, this)">Sao chép</button>
+                    <div class="prompt-toggle">
                         <span class="toggle-icon">▼</span>
                         <span class="toggle-label">Mở xem</span>
                     </div>
                 </div>
             </div>
             <div class="prompt-accordion-body" style="display: none;">
-                <p class="remake-subtext">Sao chép Mega Prompt này dán vào Gemini. Hệ thống tự động gợi ý đúng các ngành nghề học viên thực tế trong STU để xuất bản ngay 3 phương án kịch bản tương ứng theo chuẩn văn phong mộc mạc anh Việt (đã lọc sạch 100% văn mẫu).</p>
-
-                <div class="prompt-code-wrapper">
-                    <div class="prompt-code-toolbar">
-                        <span class="prompt-code-filename">📄 MEGA_PROMPT_REMAKE_GEMINI.md</span>
-                        <button class="copy-prompt-btn" onclick="copyMegaPrompt(event, this)">📋 Sao chép Prompt</button>
+                <p class="prompt-desc">Sao chép Mega Prompt này dán vào Gemini. Hệ thống tự động gợi ý đúng các ngành nghề học viên thực tế trong STU.</p>
+                <div class="prompt-code-wrap">
+                    <div class="prompt-code-bar">
+                        <span>MEGA_PROMPT_REMAKE_GEMINI.md</span>
+                        <button class="prompt-copy-btn" onclick="copyMegaPrompt(event, this)">Sao chép Prompt</button>
                     </div>
                     <div class="prompt-code-content" id="megaPromptText">Bạn là Đạo diễn Video Ngắn &amp; Chuyên gia Tinh chỉnh Lời thoại Thực Chiến theo trường phái mộc mạc của anh Việt (nguyen-viet-voice).
 
-Tôi có cấu trúc logic giữ chân 26 giây đắt giá từ video mẫu với 4 nhịp:
+Tôi có cấu trúc logic giữ chân từ video mẫu với 4 nhịp:
 1. Hook 3s: Nêu sự thật trần trụi về một việc ai cũng nghĩ là đơn giản.
-2. Xung đột 2 vế: Cái cớ chủ quan giữ thể diện ("Tưởng 2 phút là xong") đối đầu với Thực tế khách quan ("Vào cuộc mới biết mất cả buổi / ở lại mấy ngày").
-3. Tactile B-roll: Bàn tay liên tục đặt từng món đồ nghề/chi tiết thật xuống bàn làm việc theo nhịp nói (âm thanh thực tế, mắt thấy tai nghe).
-4. Kết bài tự trào &amp; Mở lời tự nhiên: Thừa nhận cái khó của người làm nghề, nhờ người xem chỉ giùm kinh nghiệm hoặc đặt câu hỏi mở chân thành.
+2. Xung đột 2 vế: Cái cớ chủ quan giữ thể diện đối đầu với Thực tế khách quan.
+3. Tactile B-roll: Bàn tay liên tục đặt từng món đồ nghề/chi tiết thật xuống bàn làm việc theo nhịp nói.
+4. Kết bài tự trào &amp; Mở lời tự nhiên: Thừa nhận cái khó của người làm nghề.
 
-=== QUY TẮC BẮT BUỘC VỀ VĂN PHONG ANH VIỆT (TUÂN THỦ 100%) ===
-- CẤM TUYỆT ĐỐI VĂN MẪU AI &amp; TỪ NGỮ SÁO RỖNG: Không dùng 'bứt phá', 'chuyển hóa', 'vũ khí', 'thần thái', 'ma trận', 'nâng tầm', 'chạm cảm xúc', 'khơi gợi nhu cầu', 'giải pháp toàn diện', 'tối ưu hóa', 'đỉnh cao', 'bí quyết', 'bật mí', 'ngộ nhận', 'rào cản', 'tử huyệt'...
-- CẤM TUYỆT ĐỐI TỪ 'ÔNG GIÁO' hoặc xưng hô thầy bà dạy đời. Đại từ xưng hô chuẩn mực: 'mình - bạn' hoặc 'tôi - bạn'.
-- CẤM TUYỆT ĐỐI MƯỢN CỚ SỐ ĐÔNG: Không dùng 'anh em mình', 'nhiều người ngoài kia', 'chúng ta thường hay'. Đi thẳng một đường thẳng vào bản chất sự việc.
-- GIỮ TRỌN VĂN PHONG MỘC MẠC: Giọng người làm nghề khiêm tốn, biết đến đâu chia sẻ đến đấy, có nụ cười tự trào duyên dáng, tôn trọng thời gian người xem.
+=== QUY TẮC VĂN PHONG ===
+- CẤM VĂN MẪU AI: Không dùng bứt phá, chuyển hóa, vũ khí, thần thái, nâng tầm...
+- CẤM từ ÔNG GIÁO. Xưng hô: mình - bạn hoặc tôi - bạn.
+- GIỮ VĂN PHONG MỘC MẠC.
 
-=== HƯỚNG DẪN TƯƠNG TÁC (QUÉT TỪ CÁC NGÀNH NGHỀ HỌC VIÊN TRONG STU) ===
-Nếu trong tin nhắn này tôi ĐÃ GHI SẴN thông tin ngành nghề ở cuối, hãy BỎ QUA bước hỏi và XUẤT BẢN NGAY 3 kịch bản.
+=== HƯỚNG DẪN ===
+Nếu tôi chưa ghi ngành nghề, hỏi 1 câu:
+1. Làm đẹp &amp; Spa / Da liễu / Salon tóc
+2. Nội thất / Decor / Kiến trúc
+3. Ẩm thực &amp; F&amp;B / Tiệm bánh
+4. Nông nghiệp / Phân bón / Sức khỏe
+5. Ngành khác: [Tên nghề] + [3 món đồ trên bàn]
 
-Nếu tôi CHƯA GHI ngành nghề, hãy DỪNG LẠI và chỉ gửi duy nhất menu 1 câu ngắn gọn sau:
-
-"Chào bạn, để viết đúng đồ nghề và cảnh quay thực tế tại chỗ làm việc của bạn (theo nhóm ngành học viên trong STU), bạn chọn ngành nào dưới đây (chỉ cần gõ số 1, 2, 3, 4, 5 hoặc gõ 1 dòng ngắn):
-1. Làm đẹp & Spa / Da liễu Clinic / Phun xăm / Salon tóc (Bàn soi da, khay dụng cụ, kem dưỡng, kéo lược)
-2. Nội thất / Decor / Kiến trúc / Vật liệu xây dựng (Bàn làm việc, thước đo, mẫu gỗ, bảng màu sơn, bản vẽ)
-3. Ẩm thực & F&B / Tiệm bánh / Trà đồ uống (Mặt bàn pha chế, thớt dao, cân tiểu ly, ly cốc)
-4. Nông nghiệp / Phân bón / Chăm sóc sức khỏe / Dược liệu (Bao bì mẫu, cây giống, khay dinh dưỡng, bình xịt)
-5. Ngành khác của bạn trong STU: Bạn nhắn giúp mình: [Tên nghề] + [Khách hay tưởng lầm điều gì] + [3 món đồ trên bàn làm việc]"
-
-Sau khi tôi chọn hoặc điền 1 dòng, hãy xuất bản ngay 3 PHƯƠNG ÁN KỊCH BẢN CHI TIẾT TỪNG GIÂY (Gồm 4 cột: Thời lượng | Hình ảnh B-roll xúc giác | Lời thoại A-roll mộc mạc | Âm thanh Foley thực tế) được lọc sạch 100% văn mẫu!</div>
+Sau khi chọn → xuất 3 PHƯƠNG ÁN KỊCH BẢN (Thời lượng | B-roll | Lời thoại | Âm thanh Foley)!</div>
                 </div>
             </div>
-        </div>
-        """
+        </div>"""
     else:
-        # Nhánh 2: Video Kỹ Thuật Quay Thuần Túy (Không thoại)
+        # Check for tech video
         corpus_check = f"{title} {fname} {overview_text}".lower()
         is_tech = any(k in corpus_check for k in ["transition", "camera", "angle", "cut", "movement", "whip_pan", "match_cut", "spin", "static_shot", "speed_ramp", "chuyen_canh", "ky_thuat_quay", "b-roll", "broll"])
         if is_tech:
             dialogue_section_html = f"""
-        <!-- KHỐI PROMPT ÁNH XẠ KỸ THUẬT CÚ MÁY SANG NGÀNH NGHỀ STU (ACCORDION ĐÓNG MẶC ĐỊNH) -->
         <div class="remake-prompt-card" id="remakePromptCard">
             <div class="prompt-accordion-header" onclick="togglePromptAccordion(this)">
-                <div class="prompt-header-left">
-                    <span class="remake-header-badge">🎥 CÚ MÁY STU</span>
-                    <span class="remake-accordion-title">Ánh xạ kỹ thuật quay này sang ngành nghề của bạn (Gemini Prompt)</span>
+                <div class="prompt-left">
+                    <span class="prompt-badge">CÚ MÁY STU</span>
+                    <span class="prompt-title">Ánh xạ kỹ thuật quay sang ngành nghề của bạn</span>
                 </div>
-                <div class="prompt-header-right">
-                    <button class="copy-prompt-btn-compact" onclick="copyMegaPrompt(event, this)">📋 Sao chép</button>
-                    <div class="prompt-toggle-btn">
+                <div class="prompt-right">
+                    <button class="prompt-copy-btn" onclick="copyMegaPrompt(event, this)">Sao chép</button>
+                    <div class="prompt-toggle">
                         <span class="toggle-icon">▼</span>
                         <span class="toggle-label">Mở xem</span>
                     </div>
                 </div>
             </div>
             <div class="prompt-accordion-body" style="display: none;">
-                <p class="remake-subtext">Video này thuần túy về kỹ thuật quay (không thoại). Sao chép Mega Prompt này dán vào Gemini để AI hướng dẫn áp dụng cú máy/chuyển cảnh này vào quay sản phẩm thực tế cho học viên STU (100% hình ảnh xúc giác, không cần nói).</p>
-
-                <div class="prompt-code-wrapper">
-                    <div class="prompt-code-toolbar">
-                        <span class="prompt-code-filename">📄 MEGA_PROMPT_TECHNIQUE_REMAKE_GEMINI.md</span>
-                        <button class="copy-prompt-btn" onclick="copyMegaPrompt(event, this)">📋 Sao chép Prompt</button>
+                <p class="prompt-desc">Video kỹ thuật quay thuần túy (không thoại). Sao chép Prompt để AI hướng dẫn áp dụng cú máy vào quay sản phẩm thực tế.</p>
+                <div class="prompt-code-wrap">
+                    <div class="prompt-code-bar">
+                        <span>MEGA_PROMPT_TECHNIQUE_REMAKE_GEMINI.md</span>
+                        <button class="prompt-copy-btn" onclick="copyMegaPrompt(event, this)">Sao chép Prompt</button>
                     </div>
-                    <div class="prompt-code-content" id="megaPromptText">Bạn là Đạo diễn Hình ảnh &amp; Chuyên gia Hướng Dẫn Thao Tác Cú Máy Thực Chiến (In-Camera Cinematography) theo trường phái mộc mạc của anh Việt.
+                    <div class="prompt-code-content" id="megaPromptText">Bạn là Đạo diễn Hình ảnh &amp; Chuyên gia Hướng Dẫn Thao Tác Cú Máy Thực Chiến.
 
-Tôi vừa học được kỹ thuật quay / chuyển cảnh cực kỳ đắt giá: {title}.
+Tôi vừa học được kỹ thuật quay đắt giá: {_esc(title)}.
 Video này KHÔNG CÓ LỜI THOẠI, sức hút nằm ở góc đặt máy, tiêu cự và chuyển động camera.
 
-=== QUY TẮC BẮT BUỘC (TUÂN THỦ 100%) ===
-- CẤM BỊA KỊCH BẢN NÓI DÔNG DÀI: Tôi không cần kịch bản nói hay lý thuyết đạo lý. Tôi cần hướng dẫn cầm điện thoại quay gì, lia máy hướng nào, đặt góc nào tại bàn làm việc thực tế.
-- CẤM VĂN MẪU AI: Không dùng 'nâng tầm', 'bứt phá', 'thần thái', 'vũ khí', 'chuyển hóa'...
-- VĂN PHONG MỘC MẠC: Xưng 'mình - bạn', hướng dẫn cầm tay chỉ việc như người làm nghề chỉ cho nhau.
+=== QUY TẮC ===
+- CẤM BỊA KỊCH BẢN NÓI. Tôi cần hướng dẫn cầm điện thoại quay gì, lia máy hướng nào.
+- CẤM VĂN MẪU AI.
+- VĂN PHONG MỘC MẠC: Xưng mình - bạn.
 
-=== HƯỚNG DẪN TƯƠNG TÁC THEO NGÀNH HỌC VIÊN STU ===
-Nếu tôi chưa ghi ngành, hãy hỏi đúng 1 câu:
-"Chào bạn, bạn muốn áp dụng cú máy này vào quay sản phẩm nào trong 4 nhóm ngành STU:
-1. Làm đẹp & Spa / Da liễu Clinic / Salon tóc (Quay cận cảnh chất kem, thao tác tay, máy soi da)
-2. Nội thất / Decor / Kiến trúc / Vật liệu xây dựng (Quay lia từ thớ gỗ/mẫu đá sang không gian hoàn thiện)
-3. Ẩm thực & F&B / Tiệm bánh / Trà đồ uống (Quay lia chuyển động quanh món ăn, đổ sốt, khói bốc lên)
-4. Nông nghiệp / Phân bón / Sức khỏe (Quay kiểm tra lá cây, rễ cây, hạt giống, bao bì sản phẩm)
-5. Ngành khác của bạn trong STU: [Tên nghề] + [Sản phẩm muốn quay]"
+=== HƯỚNG DẪN ===
+Nếu tôi chưa ghi ngành, hỏi 1 câu:
+1. Làm đẹp &amp; Spa (quay kem, thao tác tay, máy soi da)
+2. Nội thất / Decor (quay lia thớ gỗ/mẫu đá sang không gian)
+3. Ẩm thực &amp; F&amp;B (quay lia quanh món ăn, đổ sốt, khói)
+4. Nông nghiệp / Sức khỏe (kiểm tra lá cây, hạt giống, bao bì)
+5. Ngành khác: [Tên nghề] + [Sản phẩm muốn quay]
 
-Sau khi tôi chọn, hãy xuất bản ngay 3 PHƯƠNG ÁN BỐ TRÍ CÚ MÁY (Gồm 4 thông số: Tiêu cự ống kính | Hướng lia máy & Điểm giấu vết cắt | Đạo cụ trên bàn | Cách phối ánh sáng tự nhiên)!</div>
+Sau khi chọn → xuất 3 PHƯƠNG ÁN BỐ TRÍ CÚ MÁY!</div>
                 </div>
             </div>
-        </div>
-        """
-    display_title = custom_headline if custom_headline else title
+        </div>"""
+
+    # === LOAD AND POPULATE TEMPLATE ===
+    try:
+        tmpl = _load_report_template()
+    except FileNotFoundError:
+        # Fallback: return minimal HTML if template not found
+        return f"<html><body><h1>{_esc(display_title)}</h1><p>Template file not found.</p></body></html>"
     
-    genre_badges = []
-    if industry: genre_badges.append(f'<span class="genre-badge" style="background:rgba(56, 189, 248, 0.15); color:var(--accent-blue); border-color:rgba(56,189,248,0.3);">{industry}</span>')
-    if shooting_style: genre_badges.append(f'<span class="genre-badge" style="background:rgba(245, 158, 11, 0.15); color:var(--accent-amber); border-color:rgba(245,158,11,0.3);">{shooting_style}</span>')
-    badges_html = " ".join(genre_badges) if genre_badges else '<span class="genre-badge">DIRECTOR STORYBOARD BREAKDOWN</span>'
+    replacements = {
+        "%%PAGE_TITLE%%": _esc(display_title),
+        "%%DISPLAY_TITLE%%": _esc(display_title),
+        "%%SOURCE_URL%%": _esc(source_url),
+        "%%CREATOR%%": _esc(creator),
+        "%%CREATOR_URL%%": _esc(creator_url),
+        "%%SHOTS_COUNT%%": str(shots_count),
+        "%%TOTAL_DUR%%": total_dur,
+        "%%BADGES_HTML%%": badges_html,
+        "%%SCRIPT_AXIS_HTML%%": script_axis_html,
+        "%%OVERVIEW_TEXT%%": _esc(overview_text),
+        "%%VIDEO_PLAYER_HTML%%": video_player_html,
+        "%%RAW_VIDEO_SRC%%": _esc(video_src),
+        "%%DIALOGUE_HTML%%": dialogue_section_html,
+        "%%ALL_CARDS%%": all_cards,
+        "%%ALL_GRID%%": all_grid,
+        "%%ALL_DRAWER%%": all_drawer,
+    }
+    
+    result = tmpl
+    for key, val in replacements.items():
+        result = result.replace(key, val)
+    
+    return result
 
-    script_axis_html = ""
-    if script_axis:
-        script_axis_html = f"""
-        <div class="script-axis-card" style="background:#0e1420; border:1px solid #1e293b; border-radius:12px; padding:16px; margin-bottom:20px;">
-            <h3 style="color:var(--accent-blue); font-size:0.95rem; margin-bottom:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:6px;">
-                <span style="font-size:1.2rem;">📍</span> TRỤC KỊCH BẢN 3 NHỊP
-            </h3>
-            <div style="color:#e2e8f0; font-size:1rem; line-height:1.6; font-weight:500;">{script_axis}</div>
-        </div>
-        """
-
-    html_content = f'''<!DOCTYPE html>
-<html lang="vi">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>{display_title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Be+Vietnam+Pro:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-<style>
-:root {{
-    --bg-main: #070a0f;
-    --bg-card: #0e1420;
-    --bg-card-hover: #151e30;
-    --bg-surface: #121928;
-    --border-color: #1e293b;
-    --border-active: #38bdf8;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --accent-blue: #38bdf8;
-    --accent-amber: #f59e0b;
-    --accent-emerald: #10b981;
-    --accent-rose: #f43f5e;
-    --accent-purple: #c084fc;
-    --font-heading: 'Plus Jakarta Sans', sans-serif;
-    --font-body: 'Be Vietnam Pro', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
-}}
-
-* {{
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-    -webkit-tap-highlight-color: transparent;
-}}
-
-body {{
-    background-color: var(--bg-main);
-    color: var(--text-primary);
-    font-family: var(--font-body);
-    line-height: 1.55;
-    font-size: 14px;
-    overflow-x: hidden;
-}}
-
-::-webkit-scrollbar {{ width: 6px; height: 6px; }}
-::-webkit-scrollbar-track {{ background: var(--bg-main); }}
-::-webkit-scrollbar-thumb {{ background: #202d42; border-radius: 3px; }}
-::-webkit-scrollbar-thumb:hover {{ background: var(--accent-blue); }}
-
-.app-container {{
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-    width: 100%;
-}}
-
-@media (min-width: 1024px) {{
-    .app-container {{
-        flex-direction: row;
-        height: 100vh;
-        overflow: hidden;
-    }}
-    .video-sidebar-col {{
-        width: 440px;
-        min-width: 440px;
-        max-width: 480px;
-        height: 100vh;
-        overflow-y: auto;
-        border-right: 1px solid var(--border-color);
-        background: var(--bg-surface);
-        display: flex;
-        flex-direction: column;
-        z-index: 30;
-    }}
-    .content-scroll-col {{
-        flex: 1;
-        height: 100vh;
-        overflow-y: auto;
-        padding: 24px 32px 60px;
-        min-width: 0;
-    }}
-}}
-
-@media (max-width: 1023px) {{
-    .video-sidebar-col {{
-        width: 100%;
-        position: sticky;
-        top: 0;
-        z-index: 50;
-        background: rgba(14, 20, 32, 0.95);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-bottom: 1px solid var(--border-color);
-    }}
-    .content-scroll-col {{
-        width: 100%;
-        padding: 16px 14px 80px;
-    }}
-}}
-
-.video-player-container {{
-    position: relative;
-    width: 100%;
-    background: #000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    overflow: hidden;
-}}
-
-@media (min-width: 1024px) {{
-    .video-player-container {{
-        aspect-ratio: 9/16;
-        max-height: 60vh;
-    }}
-}}
-@media (max-width: 1023px) {{
-    .video-player-container {{
-        max-height: 38vh;
-        aspect-ratio: 16/9;
-    }}
-}}
-
-video#mainPlayer {{
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    outline: none;
-}}
-
-.video-controls-panel {{
-    padding: 12px 16px;
-    background: #0b111c;
-    border-bottom: 1px solid var(--border-color);
-}}
-
-.current-status-bar {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-    font-size: 12px;
-}}
-
-.status-tag {{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(56, 189, 248, 0.15);
-    color: var(--accent-blue);
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-weight: 700;
-    font-size: 11.5px;
-}}
-
-.speed-buttons-row {{
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-}}
-
-.ctrl-btn {{
-    background: #162032;
-    color: #cbd5e1;
-    border: 1px solid #283750;
-    padding: 5px 9px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s;
-}}
-
-.ctrl-btn:hover, .ctrl-btn:active {{
-    background: #25334d;
-    color: #fff;
-}}
-
-.ctrl-btn.active {{
-    background: var(--accent-blue);
-    color: #041324;
-    border-color: var(--accent-blue);
-    font-weight: 800;
-}}
-
-.report-header-banner {{
-    background: linear-gradient(135deg, #0e1726 0%, #152238 100%);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 20px;
-}}
-
-.header-top-row {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 8px;
-}}
-
-.genre-badge {{
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--accent-amber);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    font-size: 11px;
-    font-weight: 800;
-    padding: 3px 8px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}}
-
-.report-title {{
-    font-family: var(--font-heading);
-    font-size: 20px;
-    font-weight: 800;
-    color: #fff;
-    line-height: 1.35;
-    margin-bottom: 10px;
-}}
-
-.meta-tags-flex {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    font-size: 12.5px;
-    color: var(--text-secondary);
-}}
-
-.meta-tags-flex strong {{
-    color: #fff;
-}}
-
-.overview-card {{
-    background: #0e1420;
-    border: 1px solid var(--border-color);
-    border-left: 4px solid var(--accent-blue);
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 20px;
-    font-size: 13.5px;
-    color: #cbd5e1;
-    line-height: 1.6;
-}}
-
-.action-toolbar {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 20px;
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    background: var(--bg-main);
-    padding: 10px 0;
-}}
-
-.view-tabs-group {{
-    display: flex;
-    gap: 4px;
-    background: #0f1624;
-    padding: 4px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-}}
-
-.view-tab-btn {{
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 12.5px;
-    font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 6px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.15s;
-}}
-
-.view-tab-btn.active {{
-    background: #1e293b;
-    color: #fff;
-    font-weight: 700;
-}}
-
-.drawer-trigger-btn {{
-    background: linear-gradient(135deg, #0284c7, #0369a1);
-    color: #fff;
-    border: none;
-    padding: 8px 14px;
-    border-radius: 8px;
-    font-weight: 700;
-    font-size: 12.5px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}}
-
-.storyboard-container {{
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}}
-
-.shot-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
-    padding: 16px;
-    display: flex;
-    gap: 18px;
-    transition: transform 0.15s, border-color 0.15s;
-}}
-
-@media (max-width: 768px) {{
-    .shot-card {{
-        flex-direction: column;
-        gap: 12px;
-    }}
-    .shot-media-col {{
-        width: 100% !important;
-        min-width: 100% !important;
-    }}
-    .shot-thumb-wrap {{
-        max-height: 240px;
-    }}
-}}
-
-.shot-card:hover {{
-    background: var(--bg-card-hover);
-    border-color: #2e3e5a;
-}}
-
-.shot-card.active-playing {{
-    border-color: var(--accent-blue);
-    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
-}}
-
-.shot-media-col {{
-    width: 135px;
-    min-width: 135px;
-    flex-shrink: 0;
-}}
-
-.shot-thumb-wrap {{
-    position: relative;
-    width: 100%;
-    aspect-ratio: 9/16;
-    background: #000;
-    border-radius: 8px;
-    overflow: hidden;
-    cursor: pointer;
-}}
-
-.shot-img {{
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}}
-
-.play-overlay {{
-    position: absolute;
-    inset: 0;
-    background: rgba(0,0,0,0.35);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    opacity: 0.7;
-}}
-
-.play-overlay svg {{
-    width: 32px;
-    height: 32px;
-    color: #fff;
-}}
-
-.zoom-btn {{
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    background: rgba(0,0,0,0.65);
-    border: none;
-    border-radius: 4px;
-    width: 24px;
-    height: 24px;
-    font-size: 11px;
-    cursor: pointer;
-    color: #fff;
-}}
-
-.thumb-time-badge {{
-    position: absolute;
-    bottom: 6px;
-    left: 6px;
-    right: 6px;
-    background: rgba(15, 23, 42, 0.85);
-    font-size: 9.5px;
-    font-weight: 700;
-    color: var(--accent-amber);
-    padding: 2px 4px;
-    border-radius: 3px;
-    text-align: center;
-    font-family: var(--font-mono);
-}}
-
-.shot-info-col {{
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}}
-
-.shot-card-header {{
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
-    border-bottom: 1px solid #1a2436;
-    padding-bottom: 8px;
-}}
-
-.shot-title-wrap {{
-    flex: 1;
-    min-width: 200px;
-}}
-
-.shot-badge-num {{
-    background: #1e293b;
-    color: var(--accent-blue);
-    font-family: var(--font-mono);
-    font-weight: 800;
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    margin-right: 6px;
-    display: inline-block;
-}}
-
-.shot-heading {{
-    font-size: 15px;
-    font-weight: 700;
-    color: #fff;
-    display: inline;
-    line-height: 1.4;
-}}
-
-.time-jump-btn {{
-    background: rgba(56, 189, 248, 0.12);
-    color: var(--accent-blue);
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    font-weight: 700;
-    font-family: var(--font-mono);
-    cursor: pointer;
-    white-space: nowrap;
-}}
-
-.shot-narrative-box {{
-    background: #121a29;
-    border-left: 3px solid #38bdf8;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 13px;
-    color: #e2e8f0;
-    line-height: 1.5;
-}}
-
-.narrative-tag {{
-    font-weight: 700;
-    color: var(--accent-blue);
-    margin-right: 4px;
-    display: block;
-    font-size: 12px;
-    margin-bottom: 2px;
-}}
-
-.critique-container {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-}}
-
-@media (max-width: 640px) {{
-    .critique-container {{
-        grid-template-columns: 1fr;
-    }}
-}}
-
-.critique-box {{
-    padding: 8px 10px;
-    border-radius: 6px;
-    font-size: 12.5px;
-    line-height: 1.45;
-}}
-
-.critique-good {{
-    background: rgba(16, 185, 129, 0.08);
-    border: 1px solid rgba(16, 185, 129, 0.25);
-}}
-
-.critique-good .critique-title {{
-    color: var(--accent-emerald);
-    font-weight: 700;
-    font-size: 12px;
-    margin-bottom: 2px;
-}}
-
-.critique-good .critique-content {{
-    color: #cbd5e1;
-}}
-
-.critique-bad {{
-    background: rgba(245, 158, 11, 0.08);
-    border: 1px solid rgba(245, 158, 11, 0.25);
-}}
-
-.critique-bad .critique-title {{
-    color: var(--accent-amber);
-    font-weight: 700;
-    font-size: 12px;
-    margin-bottom: 2px;
-}}
-
-.critique-bad .critique-content {{
-    color: #cbd5e1;
-}}
-
-.takeaway-box {{
-    background: rgba(192, 132, 252, 0.08);
-    border: 1px solid rgba(192, 132, 252, 0.25);
-    border-radius: 6px;
-    padding: 8px 10px;
-    font-size: 12.5px;
-    line-height: 1.45;
-}}
-
-.takeaway-title {{
-    color: var(--accent-purple);
-    font-weight: 700;
-    font-size: 12px;
-    margin-bottom: 2px;
-}}
-
-.takeaway-content {{
-    color: #e2e8f0;
-}}
-
-.props-list {{
-    font-size: 12px;
-    color: #cbd5e1;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 4px 12px;
-    background: #0b1019;
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid #182234;
-}}
-
-@media (max-width: 640px) {{
-    .props-list {{
-        grid-template-columns: 1fr;
-    }}
-}}
-
-.prop-label {{ font-weight: 700; color: #94a3b8; }}
-.prop-val {{ color: #e2e8f0; }}
-
-
-.tags-row {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
-}}
-
-.tag-pill {{
-    background: #162032;
-    color: #94a3b8;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 4px;
-}}
-
-.grid-container {{
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
-}}
-
-.grid-card {{
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    overflow: hidden;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-}}
-
-.grid-img-wrap {{
-    position: relative;
-    width: 100%;
-    aspect-ratio: 9/16;
-    background: #000;
-}}
-
-.grid-img-wrap img {{
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}}
-
-.grid-play-icon {{
-    position: absolute;
-    inset: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-size: 24px;
-    color: #fff;
-    background: rgba(0,0,0,0.3);
-    opacity: 0;
-}}
-
-.grid-card:hover .grid-play-icon {{ opacity: 1; }}
-
-.grid-zoom-btn {{
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    background: rgba(0,0,0,0.7);
-    border: none;
-    border-radius: 3px;
-    color: #fff;
-    font-size: 10px;
-    width: 20px;
-    height: 20px;
-}}
-
-.grid-badge-top {{
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    background: rgba(15, 23, 42, 0.85);
-    color: var(--accent-blue);
-    font-size: 9px;
-    font-weight: 800;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-family: var(--font-mono);
-}}
-
-.grid-badge-bottom {{
-    position: absolute;
-    bottom: 4px;
-    left: 4px;
-    right: 4px;
-    background: rgba(15, 23, 42, 0.85);
-    color: var(--accent-amber);
-    font-size: 9px;
-    font-weight: 700;
-    padding: 1px 4px;
-    border-radius: 3px;
-    text-align: center;
-    font-family: var(--font-mono);
-}}
-
-.grid-title-snippet {{
-    padding: 6px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #cbd5e1;
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}}
-
-.drawer-backdrop {{
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(4px);
-    z-index: 100;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.25s ease;
-}}
-
-.drawer-backdrop.open {{ opacity: 1; visibility: visible; }}
-
-.drawer-panel {{
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 320px;
-    max-width: 85vw;
-    background: #0f172a;
-    border-left: 1px solid var(--border-color);
-    z-index: 101;
-    display: flex;
-    flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}}
-
-.drawer-backdrop.open .drawer-panel {{ transform: translateX(0); }}
-
-.drawer-header {{
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}}
-
-.drawer-title {{ font-weight: 800; font-size: 15px; color: #fff; }}
-.drawer-close-btn {{ background: #1e293b; border: none; color: #fff; width: 28px; height: 28px; border-radius: 6px; font-size: 16px; cursor: pointer; }}
-
-.drawer-list {{
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}}
-
-.drawer-item {{
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 10px;
-    background: #131d30;
-    border: 1px solid #1e2d48;
-    border-radius: 8px;
-    cursor: pointer;
-}}
-
-.drawer-item:hover, .drawer-item:active {{
-    background: #1c2b47;
-    border-color: var(--accent-blue);
-}}
-
-.drawer-thumb {{
-    width: 44px;
-    height: 58px;
-    border-radius: 4px;
-    overflow: hidden;
-    flex-shrink: 0;
-    background: #000;
-}}
-
-.drawer-thumb img {{ width: 100%; height: 100%; object-fit: cover; }}
-.drawer-info {{ flex: 1; min-width: 0; }}
-.drawer-shot-title {{ font-weight: 700; font-size: 12.5px; color: var(--accent-blue); }}
-.drawer-shot-headline {{ font-size: 11.5px; color: #fff; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-.drawer-shot-time {{ font-size: 11px; color: var(--accent-amber); font-family: var(--font-mono); }}
-.drawer-play-arrow {{ font-size: 13px; color: var(--accent-blue); }}
-
-#lightboxModal {{
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.92);
-    backdrop-filter: blur(8px);
-    z-index: 200;
-    display: none;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: 20px;
-}}
-
-#lightboxImg {{
-    max-width: 90vw;
-    max-height: 80vh;
-    object-fit: contain;
-    border-radius: 8px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.8);
-    border: 1px solid #334155;
-}}
-
-#lightboxCaption {{
-    color: #e2e8f0;
-    font-size: 13.5px;
-    margin-top: 14px;
-    text-align: center;
-    background: rgba(15, 23, 42, 0.85);
-    padding: 6px 16px;
-    border-radius: 20px;
-    border: 1px solid #334155;
-    max-width: 90vw;
-}}
-
-.lightbox-close {{
-    position: absolute;
-    top: 20px;
-    right: 25px;
-    color: #fff;
-    font-size: 32px;
-    cursor: pointer;
-}}
-
-/* Styling for 2-Column Dialogue Script & Remake Prompt Box */
-.dialogue-container-2col {{
-    display: flex;
-    gap: 16px;
-    align-items: stretch;
-    margin-bottom: 20px;
-}}
-
-@media (max-width: 900px) {{
-    .dialogue-container-2col {{
-        flex-direction: column;
-    }}
-}}
-
-/* CỘT CHÍNH (TRÁI): TIẾNG VIỆT ĐỌC LIỀN MẠCH */
-.col-vietnamese-flow {{
-    flex: 1;
-    min-width: 0;
-    background: #0d1422;
-    border: 1px solid #1e2b40;
-    border-radius: 12px;
-    padding: 18px 22px;
-    display: flex;
-    flex-direction: column;
-}}
-
-.col-flow-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #1a2538;
-    flex-wrap: wrap;
-    gap: 8px;
-}}
-
-.col-flow-badge {{
-    font-family: var(--font-heading);
-    font-size: 14.5px;
-    font-weight: 800;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    letter-spacing: 0.3px;
-}}
-
-.col-flow-subtag {{
-    font-size: 11.5px;
-    color: var(--accent-emerald);
-    font-weight: 700;
-    background: rgba(16, 185, 129, 0.12);
-    padding: 2px 8px;
-    border-radius: 4px;
-    border: 1px solid rgba(16, 185, 129, 0.25);
-}}
-
-.vn-script-body {{
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}}
-
-.vn-script-para {{
-    background: #111a2c;
-    border: 1px solid #1e2c44;
-    border-left: 3px solid var(--accent-amber);
-    border-radius: 8px;
-    padding: 11px 14px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}}
-
-.vn-script-para:hover {{
-    background: #162238;
-    border-color: #2b3d5c;
-    transform: translateX(2px);
-}}
-
-.para-meta-line {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-}}
-
-.para-timestamp-tag {{
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--accent-blue);
-    background: rgba(56, 189, 248, 0.1);
-    border: 1px solid rgba(56, 189, 248, 0.25);
-    padding: 1px 6px;
-    border-radius: 3px;
-}}
-
-.para-beat-label {{
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--accent-amber);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-}}
-
-.para-text {{
-    font-size: 14.5px;
-    color: #f8fafc;
-    line-height: 1.6;
-    font-weight: 500;
-    display: block;
-}}
-
-/* CỘT PHỤ (PHẢI): KHỐI NHỎ CHỮ BÉ XÍU TIẾNG ANH ĐỐI CHIẾU */
-.col-english-aside {{
-    width: 270px;
-    min-width: 250px;
-    background: #090e18;
-    border: 1px solid #162030;
-    border-radius: 12px;
-    padding: 14px 16px;
-    display: flex;
-    flex-direction: column;
-}}
-
-@media (max-width: 900px) {{
-    .col-english-aside {{
-        width: 100%;
-        min-width: 0;
-    }}
-}}
-
-.col-aside-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #141c2b;
-}}
-
-.aside-title {{
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 700;
-    color: #64748b;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-}}
-
-.aside-note {{
-    font-size: 10px;
-    color: #475569;
-    font-style: italic;
-}}
-
-.en-lines-list {{
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}}
-
-.en-line-item {{
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid #141d2c;
-    border-radius: 6px;
-    padding: 7px 10px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}}
-
-.en-line-item:hover {{
-    background: rgba(255, 255, 255, 0.04);
-    border-color: #1e2c40;
-}}
-
-.en-time {{
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    color: #475569;
-    font-weight: 600;
-    display: block;
-    margin-bottom: 2px;
-}}
-
-.en-text {{
-    font-size: 11px;
-    color: #64748b;
-    font-style: italic;
-    line-height: 1.45;
-}}
-
-/* Remake Mega Prompt Box (Accordion Closed Default) */
-.remake-prompt-card {{
-    background: linear-gradient(135deg, #0e1726 0%, #16243b 100%);
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-    border-radius: 10px;
-    margin-bottom: 20px;
-    overflow: hidden;
-    transition: all 0.2s ease;
-}}
-
-.prompt-accordion-header {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    cursor: pointer;
-    user-select: none;
-    background: rgba(15, 23, 42, 0.6);
-    gap: 10px;
-    transition: background 0.15s ease;
-}}
-
-.prompt-accordion-header:hover {{
-    background: rgba(30, 41, 59, 0.85);
-}}
-
-.prompt-header-left {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    flex: 1;
-}}
-
-.remake-header-badge {{
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: rgba(56, 189, 248, 0.15);
-    color: var(--accent-blue);
-    border: 1px solid rgba(56, 189, 248, 0.3);
-    font-size: 10.5px;
-    font-weight: 800;
-    padding: 2px 8px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    flex-shrink: 0;
-}}
-
-.remake-accordion-title {{
-    font-family: var(--font-heading);
-    font-size: 13.5px;
-    font-weight: 700;
-    color: #f8fafc;
-    line-height: 1.3;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}}
-
-.prompt-header-right {{
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-}}
-
-.copy-prompt-btn-compact {{
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: var(--accent-blue);
-    color: #041324;
-    border: none;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-}}
-
-.copy-prompt-btn-compact:hover {{
-    filter: brightness(1.15);
-    transform: translateY(-1px);
-}}
-
-.prompt-toggle-btn {{
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: #94a3b8;
-    font-weight: 600;
-    white-space: nowrap;
-}}
-
-.toggle-icon {{
-    font-size: 9px;
-    transition: transform 0.2s ease;
-}}
-
-.prompt-accordion-body {{
-    padding: 14px 16px 16px 16px;
-    border-top: 1px solid rgba(56, 189, 248, 0.2);
-    background: rgba(8, 13, 22, 0.5);
-}}
-
-.remake-subtext {{
-    font-size: 12.5px;
-    color: #cbd5e1;
-    line-height: 1.5;
-    margin-bottom: 12px;
-}}
-
-.prompt-code-wrapper {{
-    position: relative;
-    background: #080d16;
-    border: 1px solid #1e2d45;
-    border-radius: 8px;
-    overflow: hidden;
-}}
-
-.prompt-code-toolbar {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #0f172a;
-    padding: 8px 14px;
-    border-bottom: 1px solid #1e2d45;
-}}
-
-.prompt-code-filename {{
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: #94a3b8;
-    font-weight: 600;
-}}
-
-.copy-prompt-btn {{
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--accent-blue);
-    color: #041324;
-    border: none;
-    padding: 5px 12px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-}}
-
-.copy-prompt-btn:hover {{
-    filter: brightness(1.1);
-    transform: translateY(-1px);
-}}
-
-.prompt-code-content {{
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: #cbd5e1;
-    line-height: 1.6;
-    padding: 14px;
-    max-height: 280px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-}}
-
-@media (max-width: 640px) {{
-    .remake-accordion-title {{
-        font-size: 12px;
-    }}
-    .prompt-accordion-header {{
-        padding: 8px 10px;
-    }}
-}}
-</style>
-</head>
-<body>
-
-<div class="app-container">
-    <div class="video-sidebar-col">
-        <div class="video-player-container">
-            <video id="mainPlayer" src="{video_src}" controls autoplay muted playsinline preload="auto" loop></video>
-        </div>
-        <div class="video-controls-panel">
-            <div class="current-status-bar">
-                <span class="status-tag" id="shotStatusTag">🎬 Phân cảnh: Toàn bộ video</span>
-                <a id="directVidLink" href="{video_src}" target="_blank" style="color:var(--accent-blue); font-size:0.75rem; text-decoration:none;">Tệp gốc ↗</a>
-            </div>
-            <div class="speed-buttons-row">
-                <span style="font-size:0.75rem; color:#94a3b8; font-weight:700; margin-right:4px;">Tốc độ:</span>
-                <button class="ctrl-btn" onclick="setSpeed(0.25, this)">0.25x</button>
-                <button class="ctrl-btn" onclick="setSpeed(0.5, this)">0.5x</button>
-                <button class="ctrl-btn active" onclick="setSpeed(1.0, this)">1.0x</button>
-                <button class="ctrl-btn" onclick="setSpeed(1.5, this)">1.5x</button>
-                <button class="ctrl-btn" onclick="stepFrame(-1)">⏮ -1F</button>
-                <button class="ctrl-btn" onclick="stepFrame(1)">+1F ⏭</button>
-                <button class="ctrl-btn" onclick="toggleMute(this)">🔊 Tiếng</button>
-                <button class="ctrl-btn" onclick="togglePlayerFullscreen()" title="Toàn màn hình (Phím F hoặc nhấp đúp)" style="background:#fffbeb; color:#b45309; border-color:#fef3c7; font-weight:700;">⛶ Toàn màn hình</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="content-scroll-col">
-        <div class="report-header-banner">
-            <div class="header-top-row">
-                <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-                    {badges_html}
-                </div>
-                <span style="font-size:0.75rem; color:var(--accent-amber); font-family:var(--font-mono); font-weight:700; margin-left:12px;">{shots_count} SHOTS &bull; {total_dur}</span>
-                <a href="https://ytuong.fedu.vn" target="_blank" style="color:var(--accent-blue); text-decoration:none; font-size:0.75rem; font-weight:700; display:inline-flex; align-items:center; gap:4px; margin-left:auto;">💡 Kho Ý Tưởng YTUONG HUB ↗</a>
-            </div>
-            <h1 class="report-title">{display_title}</h1>
-            <div class="meta-tags-flex">
-                <span>Tác giả: <strong>{creator}</strong></span>
-                <span>Tệp: <strong>{fname}</strong></span>
-                <span>Trực quan: <strong>9:16 Vertical HD</strong></span>
-            </div>
-        </div>
-
-        {script_axis_html}
-
-        <div class="overview-card">
-            <h3 style="color:#fff; font-size:1rem; margin-bottom:6px; font-weight:700;">🎯 TỔNG QUAN PHONG CÁCH THỊ GIÁC &amp; NGÔN NGỮ ĐIỆN ẢNH.</h3>
-            <div>{overview_text}</div>
-        </div>
-
-        {dialogue_section_html}
-
-        <div class="action-toolbar">
-            <div class="view-tabs-group">
-                <button class="view-tab-btn active" id="tabDetailBtn" onclick="switchView('detail')">📋 Bóc Tách Chi Tiết</button>
-                <button class="view-tab-btn" id="tabGridBtn" onclick="switchView('grid')">🖼️ Lưới Soi Ảnh ({shots_count})</button>
-            </div>
-            <button class="drawer-trigger-btn" onclick="toggleDrawer(true)">📑 Mục Lục Shot</button>
-        </div>
-
-        <div class="storyboard-container" id="storyboardView">
-            {all_cards}
-        </div>
-
-        <div class="grid-container" id="gridView" style="display:none;">
-            {all_grid}
-        </div>
-    </div>
-</div>
-
-<div class="drawer-backdrop" id="drawerBackdrop" onclick="toggleDrawer(false)">
-    <div class="drawer-panel" onclick="event.stopPropagation()">
-        <div class="drawer-header">
-            <div class="drawer-title">📑 MỤC LỤC PHÂN CẢNH ({shots_count})</div>
-            <button class="drawer-close-btn" onclick="toggleDrawer(false)">&times;</button>
-        </div>
-        <div class="drawer-list">
-            {all_drawer}
-        </div>
-    </div>
-</div>
-
-<div id="lightboxModal" onclick="closeLightbox()">
-    <span class="lightbox-close" onclick="closeLightbox()">&times;</span>
-    <img id="lightboxImg" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'></svg>" onclick="event.stopPropagation()" />
-    <div id="lightboxCaption"></div>
-</div>
-
-<script>
-const rawVideoSrc = "{video_src}";
-let currentEndTime = null;
-
-function getCandidateUrls(src) {{
-    if (!src) return [];
-    if (src.startsWith('http://') || src.startsWith('https://')) return [src];
-    let clean = src.replace(/^(\\.\\/|\\.\\.\\/)+/, '').replace(/^(videos\\/|reports\\/)/, '');
-    return [
-        '{R2_MEDIA_BASE}/videos/' + encodeURI(clean),
-        '../videos/' + clean,
-        './videos/' + clean,
-        './' + clean
-    ];
-}}
-
-const candidateUrls = getCandidateUrls(rawVideoSrc);
-let candidateIdx = 0;
-const player = document.getElementById('mainPlayer');
-
-function loadVideoCandidate() {{
-    if (candidateIdx >= candidateUrls.length) return;
-    const url = candidateUrls[candidateIdx];
-    player.src = url;
-    document.getElementById('directVidLink').href = url;
-    player.load();
-}}
-
-player.onerror = () => {{
-    candidateIdx++;
-    if (candidateIdx < candidateUrls.length) {{
-        loadVideoCandidate();
-    }}
-}};
-
-loadVideoCandidate();
-
-function playShot(startTime, endTime, label) {{
-    currentEndTime = (typeof endTime === 'number') ? endTime : null;
-    const tag = document.getElementById('shotStatusTag');
-    if (tag) {{
-        const endTxt = currentEndTime ? ` - ${{currentEndTime.toFixed(2)}}s` : '';
-        tag.innerText = `🎬 ${{label || 'Phân cảnh'}}: [${{startTime.toFixed(2)}}s${{endTxt}}]`;
-    }}
-    player.currentTime = startTime;
-    const p = player.play();
-    if (p !== undefined) {{
-        p.catch(e => {{
-            player.muted = true;
-            player.play().catch(err => console.log('Autoplay muted triggered'));
-        }});
-    }}
-    document.querySelectorAll('.shot-card').forEach(c => c.classList.remove('active-playing'));
-    const matchCard = Array.from(document.querySelectorAll('.shot-card')).find(c => c.innerText.includes(label));
-    if (matchCard) matchCard.classList.add('active-playing');
-
-    if (window.innerWidth < 1024) {{
-        window.scrollTo({{ top: 0, behavior: 'smooth' }});
-    }}
-}}
-
-function setSpeed(speed, btn) {{
-    player.playbackRate = speed;
-    document.querySelectorAll('.speed-buttons-row .ctrl-btn').forEach(b => b.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-}}
-
-function stepFrame(frames) {{
-    player.pause();
-    player.currentTime += (frames * (1/30));
-}}
-
-function toggleMute(btn) {{
-    player.muted = !player.muted;
-    if (btn) btn.innerText = player.muted ? '🔇 Tắt Tiếng' : '🔊 Tiếng';
-}}
-
-function togglePlayerFullscreen() {{
-    const v = document.getElementById('mainPlayer');
-    if (!v) return;
-    if (!document.fullscreenElement && !document.webkitFullscreenElement) {{
-        if (v.requestFullscreen) {{
-            v.requestFullscreen().catch(() => {{}});
-        }} else if (v.webkitRequestFullscreen) {{
-            v.webkitRequestFullscreen();
-        }} else if (v.webkitEnterFullscreen) {{
-            v.webkitEnterFullscreen();
-        }}
-    }} else {{
-        if (document.exitFullscreen) {{
-            document.exitFullscreen().catch(() => {{}});
-        }} else if (document.webkitExitFullscreen) {{
-            document.webkitExitFullscreen();
-        }}
-    }}
-}}
-
-document.addEventListener('keydown', (e) => {{
-    if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {{
-        e.preventDefault();
-        togglePlayerFullscreen();
-    }}
-}});
-
-function switchView(view) {{
-    const sb = document.getElementById('storyboardView');
-    const grid = document.getElementById('gridView');
-    const tabDetail = document.getElementById('tabDetailBtn');
-    const tabGrid = document.getElementById('tabGridBtn');
-    if (view === 'grid') {{
-        sb.style.display = 'none';
-        grid.style.display = 'grid';
-        tabDetail.classList.remove('active');
-        tabGrid.classList.add('active');
-    }} else {{
-        sb.style.display = 'flex';
-        grid.style.display = 'none';
-        tabDetail.classList.add('active');
-        tabGrid.classList.remove('active');
-    }}
-}}
-
-function toggleDrawer(open) {{
-    const drawer = document.getElementById('drawerBackdrop');
-    if (open) drawer.classList.add('open');
-    else drawer.classList.remove('open');
-}}
-
-function jumpToShot(shotNum, st, et, label) {{
-    toggleDrawer(false);
-    switchView('detail');
-    playShot(st, et, label);
-    const targetCard = document.getElementById('shot-card-' + shotNum);
-    if (targetCard) {{
-        targetCard.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-    }}
-}}
-
-function openLightbox(src, caption) {{
-    const modal = document.getElementById('lightboxModal');
-    const img = document.getElementById('lightboxImg');
-    const cap = document.getElementById('lightboxCaption');
-    img.src = src;
-    cap.innerText = caption || '';
-    modal.style.display = 'flex';
-}}
-
-function closeLightbox() {{
-    document.getElementById('lightboxModal').style.display = 'none';
-}}
-
-document.addEventListener('keydown', (e) => {{
-    if (e.key === 'Escape') {{
-        closeLightbox();
-        toggleDrawer(false);
-    }} else if (e.key === ' ') {{
-        if (document.activeElement.tagName !== 'INPUT') {{
-            e.preventDefault();
-            player.paused ? player.play() : player.pause();
-        }}
-    }}
-}});
-
-function togglePromptAccordion(headerEl) {{
-    const card = headerEl.closest('.remake-prompt-card');
-    if (!card) return;
-    const body = card.querySelector('.prompt-accordion-body');
-    const icon = card.querySelector('.toggle-icon');
-    const label = card.querySelector('.toggle-label');
-    if (!body) return;
-    const isCollapsed = (body.style.display === 'none' || getComputedStyle(body).display === 'none');
-    if (isCollapsed) {{
-        body.style.display = 'block';
-        if (icon) icon.textContent = '▲';
-        if (label) label.textContent = 'Thu gọn';
-    }} else {{
-        body.style.display = 'none';
-        if (icon) icon.textContent = '▼';
-        if (label) label.textContent = 'Mở xem';
-    }}
-}}
-
-function copyMegaPrompt(e, btn) {{
-    if (e && e.stopPropagation) e.stopPropagation();
-    const card = btn.closest('.remake-prompt-card');
-    const codeEl = card ? card.querySelector('.prompt-code-content') : document.getElementById('megaPromptText');
-    if (!codeEl) return;
-    const text = codeEl.innerText || codeEl.textContent;
-    navigator.clipboard.writeText(text).then(() => {{
-        const orig = btn.innerHTML;
-        btn.innerHTML = '✅ Đã chép!';
-        const oldBg = btn.style.background;
-        const oldColor = btn.style.color;
-        btn.style.background = '#10b981';
-        btn.style.color = '#fff';
-        setTimeout(() => {{
-            btn.innerHTML = orig;
-            btn.style.background = oldBg;
-            btn.style.color = oldColor;
-        }}, 2000);
-    }}).catch(err => {{
-        alert('Lỗi sao chép, bạn vui lòng bôi đen văn bản để copy nhé!');
-    }});
-}}
-
-</script>
-</body>
-</html>'''
-    html_content = re.sub(r'font-size\s*:\s*(\d+(?:\.\d+)?)\s*px', lambda m: f"font-size: {round(float(m.group(1))/16, 3)}rem" if float(m.group(1)) < 15.5 else m.group(0), html_content)
-    return html_content
 
 def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=None, force=False, user_note=None):
     script_dir = os.path.dirname(os.path.abspath(__file__))

@@ -76,6 +76,10 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     title_raw = "_".join(folder_name.split("_")[3:]) if len(folder_name.split("_")) > 3 else folder_name
     title_display = f"@{uploader} - {title_raw.replace('_', ' ')}"
     main_vid_url = f"https://media.fedu.vn/videos/{shortcode}.mp4"
+    
+    # Derive URLs
+    source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
+    creator_url = f"https://www.instagram.com/{uploader}/"
 
     # Xử lý overview
     if not overview:
@@ -98,7 +102,9 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
         custom_headline=custom_headline,
         script_axis=script_axis,
         industry=industry,
-        shooting_style=style
+        shooting_style=style,
+        source_url=source_url,
+        creator_url=creator_url
     )
 
     # Ghi file HTML cục bộ
