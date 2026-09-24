@@ -525,7 +525,7 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
         # GRID ITEM
         grid_html.append(f'''
         <div class="grid-item" onclick="playShot({st}, {et}, '{st_title}')">
-            <div class="grid-img-wrap">
+            <div class="grid-thumb">
                 <img src="{img_url}" alt="{st_title}" loading="lazy" />
                 <span class="grid-num">{st_title}</span>
                 <span class="grid-time">{st:.1f}s – {et:.1f}s</span>
