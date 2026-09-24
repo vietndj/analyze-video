@@ -152,20 +152,24 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
 
     # Khôi phục custom_headline từ master_classifications.json nếu AI quên truyền
     if not custom_headline:
-        try:
-            cfg_path = os.path.join(PORTAL_REPO, "master_classifications.json")
-            if os.path.exists(cfg_path):
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    cfgs = json.load(f)
-                for k in [shortcode, folder_name]:
-                    if k in cfgs and cfgs[k].get("title"):
-                        existing_title = cfgs[k]["title"].strip()
-                        if not existing_title.startswith("@") and existing_title != title_display:
-                            custom_headline = existing_title
-                            print(f"[*] Đã khôi phục tiêu đề từ master: {custom_headline}")
-                            break
-        except Exception:
-            pass
+        for r in [PORTAL_REPO, YTUONG_REPO]:
+            try:
+                cfg_path = os.path.join(r, "master_classifications.json")
+                if os.path.exists(cfg_path):
+                    with open(cfg_path, "r", encoding="utf-8") as f:
+                        cfgs = json.load(f)
+                    for k in [shortcode, folder_name]:
+                        if k in cfgs and cfgs[k].get("title"):
+                            existing_title = cfgs[k]["title"].strip()
+                            # Check if existing_title is a genuine custom title (not the generic raw display title)
+                            if existing_title and existing_title != title_display and not existing_title.startswith("Video by"):
+                                custom_headline = existing_title
+                                print(f"[*] Đã khôi phục tiêu đề từ master: {custom_headline}")
+                                break
+            except Exception:
+                pass
+            if custom_headline:
+                break
 
     # Render lại báo cáo HTML
     html_src = generate_mobile_first_report(
