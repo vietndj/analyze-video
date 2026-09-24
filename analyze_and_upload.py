@@ -125,6 +125,70 @@ def fetch_lazada_meta(url):
         print(f"[-] Lazada API error: {e}")
     return None
 
+def fetch_shopee_meta(url):
+    """Scrape video URL from Shopee product page using Playwright headless."""
+    try:
+        import asyncio
+        import re
+        from playwright.async_api import async_playwright
+
+        async def _extract(target_url):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+                page = await context.new_page()
+                video_url = None
+                def handle_response(response):
+                    nonlocal video_url
+                    u = response.url
+                    if ('.mp4' in u or 'video' in u) and ('shopee' in u or 'scdn' in u or 'cf.shopee' in u) and response.status == 200:
+                        ct = response.headers.get('content-type', '')
+                        if 'video' in ct or '.mp4' in u:
+                            video_url = u
+
+                page.on('response', handle_response)
+                await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+                title = await page.title()
+                # Try clicking video play button
+                for _ in range(12):
+                    if video_url:
+                        break
+                    try:
+                        await page.click('[class*="video"], [class*="Video"], [data-sqe="video"]', timeout=1000)
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+                await browser.close()
+                return title, video_url
+
+        title, video_url = asyncio.run(_extract(url))
+        if video_url:
+            clean_title = re.sub(r'^Shopee\s*[-|:]\s*', '', title, flags=re.I).strip()
+            if not clean_title or clean_title.lower() == "shopee":
+                clean_title = "Shopee Product Video"
+            # Extract shop name from URL if possible
+            shop_name = "shopee_seller"
+            if '/shop/' in url:
+                parts = url.split('/shop/')
+                if len(parts) > 1:
+                    shop_name = parts[1].split('/')[0].split('?')[0]
+            shortcode = url.split('/')[-1].split('?')[0].split('.')[-1] if '/' in url else "shopee_vid"
+            return {
+                "id": shortcode,
+                "uploader": shop_name,
+                "title": clean_title,
+                "description": f"Video giới thiệu {clean_title} trên Shopee",
+                "url": url,
+                "duration": 15,
+                "play_url": video_url,
+                "is_carousel": False
+            }
+    except Exception as e:
+        print(f"[-] Shopee API error: {e}")
+    return None
+
 def get_post_metadata(url_or_path):
     if os.path.isfile(url_or_path):
         stem = Path(url_or_path).stem
@@ -145,6 +209,11 @@ def get_post_metadata(url_or_path):
         lz_item = fetch_lazada_meta(url_or_path)
         if lz_item:
             return [lz_item]
+
+    if "shopee.vn" in url_or_path or "shopee.co" in url_or_path:
+        sp_item = fetch_shopee_meta(url_or_path)
+        if sp_item:
+            return [sp_item]
 
     cmd = f'yt-dlp --cookies-from-browser chrome --no-warnings --dump-json "{url_or_path}"'
     code, out, _ = run_cmd(cmd)

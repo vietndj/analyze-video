@@ -58,14 +58,17 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     if shots_update_file and os.path.exists(shots_update_file):
         with open(shots_update_file, "r", encoding="utf-8") as uf:
             updates = json.load(uf)
-        for i, s in enumerate(shots_data):
-            if i < len(updates):
-                up = updates[i]
-                for key in ["headline", "subject_action", "composition_good", "composition_bad", "takeaway", "shot_type", "lighting", "transition"]:
-                    if key in up:
-                        s[key] = up[key]
-                        if "analysis" in s:
-                            s["analysis"][key] = up[key]
+        if len(updates) > len(shots_data):
+            shots_data = updates
+        else:
+            for i, s in enumerate(shots_data):
+                if i < len(updates):
+                    up = updates[i]
+                    for key in ["headline", "subject_action", "composition_good", "composition_bad", "takeaway", "shot_type", "lighting", "transition"]:
+                        if key in up:
+                            s[key] = up[key]
+                            if "analysis" in s:
+                                s["analysis"][key] = up[key]
         with open(shot_info_path, "w", encoding="utf-8") as f:
             json.dump(shots_data, f, ensure_ascii=False, indent=2)
         print(f"[+] Đã cập nhật {len(updates)} shots vào {shot_info_path}")
@@ -78,8 +81,8 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     main_vid_url = f"https://media.fedu.vn/videos/{shortcode}.mp4"
     
     # Derive URLs
-    if shortcode == "oU2DB" or "lazada" in folder_name.lower():
-        source_url = "https://s.lazada.vn/s.oU2DB?c=w"
+    if shortcode in ["oU2DB", "oUV0c"] or "lazada" in folder_name.lower() or uploader.lower() == "ulanzi":
+        source_url = f"https://s.lazada.vn/s.{shortcode}?c=w" if shortcode in ["oU2DB", "oUV0c"] else "https://www.lazada.vn/shop/ulanzi-flagship-store/"
         creator_url = "https://www.lazada.vn/shop/ulanzi-flagship-store/"
     else:
         source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
