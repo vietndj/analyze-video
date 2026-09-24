@@ -99,6 +99,7 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
                     for k in [shortcode, folder_name]:
                         if k in cfgs and cfgs[k].get("youtube_url"):
                             youtube_url = cfgs[k].get("youtube_url")
+                            print(f"[DEBUG] Found youtube_url '{youtube_url}' for key '{k}' in {cfg_path}")
                             break
                 except Exception:
                     pass
@@ -148,6 +149,23 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
             overview = f"⚡ {h1} ➔ {h2}" if h2 else f"⚡ {h1}"
         else:
             overview = f"Phân tích thị giác chi tiết {len(shots_data)} phân cảnh chuẩn điện ảnh."
+
+    # Khôi phục custom_headline từ master_classifications.json nếu AI quên truyền
+    if not custom_headline:
+        try:
+            cfg_path = os.path.join(PORTAL_REPO, "master_classifications.json")
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfgs = json.load(f)
+                for k in [shortcode, folder_name]:
+                    if k in cfgs and cfgs[k].get("title"):
+                        existing_title = cfgs[k]["title"].strip()
+                        if not existing_title.startswith("@") and existing_title != title_display:
+                            custom_headline = existing_title
+                            print(f"[*] Đã khôi phục tiêu đề từ master: {custom_headline}")
+                            break
+        except Exception:
+            pass
 
     # Render lại báo cáo HTML
     html_src = generate_mobile_first_report(
@@ -205,6 +223,8 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
                     entry["quick_takeaway"] = overview
                 if purpose:
                     entry["purpose"] = purpose
+                if custom_headline:
+                    entry["title"] = custom_headline
                 entry["shots_count"] = len(shots_data)
                 if shots_data:
                     entry["duration"] = f"{round(sum(s.get('duration', 0) for s in shots_data), 1)}s"
