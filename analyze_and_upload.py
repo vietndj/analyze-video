@@ -85,8 +85,11 @@ def fetch_lazada_meta(url):
                 )
                 page = await context.new_page()
                 video_url = None
+                
+                # Keep fallback network listener just in case
                 def handle_response(response):
                     nonlocal video_url
+                    if video_url: return
                     u = response.url
                     if ('.mp4' in u or 'video_target' in u) and 'lazcdn.com' in u:
                         video_url = u
@@ -94,14 +97,32 @@ def fetch_lazada_meta(url):
                 page.on('response', handle_response)
                 await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
                 title = await page.title()
-                for _ in range(12):
+                
+                for _ in range(15):
                     if video_url:
                         break
+                    # Aggressively click video player
                     try:
-                        await page.click('div[class*="video"], span[class*="video"], [data-spm*="video"]', timeout=1000)
+                        await page.evaluate('''() => {
+                            let btn = document.querySelector('.gallery-preview-panel-v2__video-player, .gallery-preview-panel-v2__video, [class*="video"]');
+                            if (btn) btn.click();
+                        }''')
                     except Exception:
                         pass
+                    
+                    # Extract from video tag
+                    try:
+                        videos = await page.evaluate('''() => {
+                            return Array.from(document.querySelectorAll('video')).map(v => v.src).filter(src => src && src.length > 0 && src.startsWith('http'));
+                        }''')
+                        if videos:
+                            video_url = videos[0]
+                            break
+                    except Exception:
+                        pass
+                        
                     await asyncio.sleep(0.5)
+                    
                 await browser.close()
                 return title, video_url
 
@@ -917,6 +938,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         duration_sec = round(total_frames / fps, 2)
 
         hists = []
+        grays = []
         while True:
             ret, frame = cap.read()
             if not ret: break
@@ -924,19 +946,25 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             hist = cv2.calcHist([hsv], [0, 1], None, [180, 256], [0, 180, 0, 256])
             cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
             hists.append(hist)
+            g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            g = cv2.resize(g, (160, 90))
+            grays.append(g)
         cap.release()
 
         diffs = [0.0]
+        gray_diffs = [0.0]
         for i in range(1, len(hists)):
             comp = cv2.compareHist(hists[i-1], hists[i], cv2.HISTCMP_CORREL)
             diffs.append(1.0 - comp)
+            gdiff = float(np.mean(cv2.absdiff(grays[i], grays[i-1])))
+            gray_diffs.append(gdiff)
 
         cut_frames = []
         min_shot = max(6, int(fps * 0.35))
         i = 1
         while i < len(diffs):
-            if diffs[i] > 0.38:
-                win = diffs[i:min(i+6, len(diffs))]
+            if diffs[i] > 0.35 or gray_diffs[i] > 25.0 or (diffs[i] > 0.12 and gray_diffs[i] > 18.0):
+                win = [diffs[k] + (gray_diffs[k] / 50.0) for k in range(i, min(i+6, len(diffs)))]
                 m_idx = int(i + np.argmax(win))
                 if not cut_frames or (m_idx - cut_frames[-1]) >= min_shot:
                     cut_frames.append(m_idx)
@@ -960,6 +988,9 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             s_st, s_en = ranges[s_idx]
             sid = s_idx + 1
 
+            if curr == s_st:
+                cv2.imwrite(os.path.join(shots_dir, f"shot_{sid:02d}_start.jpg"), frame)
+
             if curr == (s_st + s_en) // 2:
                 m_name = f"shot_{sid:02d}_mid.jpg"
                 m_path = os.path.join(shots_dir, m_name)
@@ -969,8 +1000,9 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
                 if brain_shots_dir:
                     cv2.imwrite(os.path.join(brain_shots_dir, m_name), frame)
                     cv2.imwrite(os.path.join(brain_shots_dir, w_name), frame)
-            
+
             if curr == s_en:
+                cv2.imwrite(os.path.join(shots_dir, f"shot_{sid:02d}_end.jpg"), frame)
                 m_path = os.path.join(shots_dir, f"shot_{sid:02d}_mid.jpg")
                 visual_an = analyze_shot_visuals(m_path, shot_idx=sid, total_shots=len(ranges))
                 img_r2_url = f"{R2_MEDIA_BASE}/images/{folder_name}/shot_{sid:02d}_mid.jpg"
