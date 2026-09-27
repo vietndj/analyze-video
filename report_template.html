@@ -119,6 +119,8 @@
             overflow: hidden;
             background: #000;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         .video-wrap video, .video-wrap iframe {
@@ -1129,6 +1131,25 @@ if (player && player.tagName !== 'IFRAME') {
 }
 
 function playShot(startTime, endTime, label) {
+    var stack = document.querySelector('.carousel-stack');
+    if (stack) {
+        var match = label ? label.match(/SHOT\s+(\d+)/i) : null;
+        var slideIndex = 0;
+        if (match) {
+            slideIndex = parseInt(match[1]) - 1;
+        } else if (startTime > 0) {
+            slideIndex = Math.floor(startTime);
+        }
+        var target = stack.querySelectorAll('video, img')[slideIndex];
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            stack.querySelectorAll('video').forEach(function(v) { v.pause(); });
+            if (target.tagName === 'VIDEO') { target.currentTime = 0; target.play().catch(function(){}); }
+        }
+        var tag = document.getElementById('shotStatusTag');
+        if (tag) tag.innerText = (label || ('Slide ' + (slideIndex+1))) + ' (Đang xem)';
+        return;
+    }
     if (!player) return;
     currentEndTime = (typeof endTime === 'number') ? endTime : null;
     var tag = document.getElementById('shotStatusTag');

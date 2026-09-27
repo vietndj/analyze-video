@@ -10,6 +10,7 @@ Sync AI Vision Analysis to HTML Reports & YTUONG HUB
 """
 import os
 import sys
+import re
 import json
 import shutil
 import argparse
@@ -78,15 +79,30 @@ def sync_analysis(folder_name_or_path, shots_update_file=None, industry=None, st
     uploader = folder_name.split("_")[1].lstrip("@") if len(folder_name.split("_")) > 1 else "creator"
     title_raw = "_".join(folder_name.split("_")[3:]) if len(folder_name.split("_")) > 3 else folder_name
     title_display = f"@{uploader} - {title_raw.replace('_', ' ')}"
-    main_vid_url = f"https://media.fedu.vn/videos/{shortcode}.mp4"
+    slides_dir = os.path.join(package_dir, "carousel_slides")
+    if os.path.exists(slides_dir):
+        import urllib.parse
+        f_enc = urllib.parse.quote(folder_name)
+        main_vid_url = f"https://media.fedu.vn/videos/carousel_slides/{f_enc}/slide_01.mp4"
+    else:
+        main_vid_url = f"https://media.fedu.vn/videos/{shortcode}.mp4"
     
     # Derive URLs
     if shortcode in ["oU2DB", "oUV0c"] or "lazada" in folder_name.lower() or uploader.lower() == "ulanzi":
         source_url = f"https://s.lazada.vn/s.{shortcode}?c=w" if shortcode in ["oU2DB", "oUV0c"] else "https://www.lazada.vn/shop/ulanzi-flagship-store/"
         creator_url = "https://www.lazada.vn/shop/ulanzi-flagship-store/"
     else:
-        source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""
+        source_url = f"https://www.instagram.com/reels/{shortcode}/" if shortcode != "video" else ""
         creator_url = f"https://www.instagram.com/{uploader}/"
+
+    try:
+        with open(os.path.join(PORTAL_REPO, "scene.html"), "r", encoding="utf-8") as sf:
+            s_txt = sf.read()
+            m_ig = re.search(rf'"{re.escape(folder_name)}"[\s\S]*?"ig_url":\s*"([^"]+)"', s_txt)
+            if m_ig and m_ig.group(1):
+                source_url = m_ig.group(1)
+    except Exception:
+        pass
 
     # Tự động tìm kiếm hoặc upload YouTube nếu chưa có youtube_url
     if not youtube_url:

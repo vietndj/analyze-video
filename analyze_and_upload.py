@@ -372,7 +372,7 @@ def analyze_shot_visuals(img_path, shot_idx=1, total_shots=1):
 
 def extract_video_dialogue(video_path):
     """Trích xuất phụ đề/thoại nguyên bản nếu có tiếng nói bằng Whisper"""
-    if not os.path.exists(video_path):
+    if not video_path or not os.path.exists(video_path):
         return None
     try:
         import whisper
@@ -412,7 +412,7 @@ def _esc(text):
         return ""
     return html.escape(str(text), quote=True)
 
-def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None, custom_headline=None, script_axis=None, industry=None, shooting_style=None, source_url=None, creator_url=None, youtube_url=None):
+def generate_mobile_first_report(title, creator, fname, overview_text, video_src, shots_data, speech_data=None, custom_headline=None, script_axis=None, industry=None, shooting_style=None, source_url=None, creator_url=None, youtube_url=None, all_vids=None):
     """Sinh mã HTML Light Theme chuẩn 30ngayviral cho báo cáo bóc tách video."""
     shots_count = len(shots_data)
     total_dur = f"{shots_data[-1]['end_time']:.2f}s" if shots_data else "N/A"
@@ -427,7 +427,7 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
         # Try to extract shortcode from folder name
         parts = fname.replace(".html", "").split("_") if fname else []
         shortcode = parts[2] if len(parts) > 2 else ""
-        source_url = f"https://www.instagram.com/reel/{shortcode}/" if shortcode else creator_url
+        source_url = f"https://www.instagram.com/reels/{shortcode}/" if shortcode else creator_url
 
     # === BADGES ===
     badges_parts = []
@@ -443,13 +443,25 @@ def generate_mobile_first_report(title, creator, fname, overview_text, video_src
     script_axis_html = ""
     if script_axis:
         script_axis_html = f"""
-        <section class="axis-card">
-            <h3 class="axis-title">TRỤC KỊCH BẢN 3 NHỊP</h3>
-            <div class="axis-content">{_esc(script_axis)}</div>
+        <section class="script-axis-card">
+            <h3 class="script-axis-title">TRỤC KỊCH BẢN 3 NHỊP</h3>
+            <div class="script-axis-content">{_esc(script_axis)}</div>
         </section>"""
 
     # === VIDEO PLAYER ===
-    if youtube_url:
+    if all_vids and len(all_vids) > 1:
+        v_player = [
+            '<style>.carousel-stack::-webkit-scrollbar { display: none; }</style>',
+            '<div class="carousel-stack" style="display:flex; flex-direction:column; gap:16px; height:100%; overflow-y:auto; scroll-snap-type:y mandatory; -ms-overflow-style:none; scrollbar-width:none;">'
+        ]
+        for v in all_vids:
+            if v["rel_url"].lower().endswith((".mp4", ".mov")):
+                v_player.append(f'<video src="{_esc(v["rel_url"])}" controls autoplay muted playsinline loop style="flex:0 0 100%; width:100%; height:100%; object-fit:contain; scroll-snap-align:start; background:#000;"></video>')
+            else:
+                v_player.append(f'<img src="{_esc(v["rel_url"])}" style="flex:0 0 100%; width:100%; height:100%; object-fit:contain; scroll-snap-align:start; background:#000;" />')
+        v_player.append('</div>')
+        video_player_html = "\n".join(v_player)
+    elif youtube_url:
         # Extract video ID from YouTube URL
         yt_id = ""
         if "youtu.be/" in youtube_url:
@@ -797,32 +809,47 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         dl_cmd = f'yt-dlp --cookies-from-browser chrome -o "{slides_dir}/slide_%(autonumber)02d.%(ext)s" "{url_or_path}"'
         run_cmd(dl_cmd)
 
-        video_files = sorted([f for f in os.listdir(slides_dir) if f.endswith(".mp4")])
+        media_exts = (".mp4", ".mov", ".jpg", ".jpeg", ".png", ".webp")
+        media_files = sorted([f for f in os.listdir(slides_dir) if f.lower().endswith(media_exts) and "_mid" not in f])
+        if media_files:
+            video_dest = os.path.join(slides_dir, media_files[0])
         r2_sub = f"videos/carousel_slides/{folder_name}"
         run_cmd(f'"{RCLONE_EXE}" copy "{slides_dir}" "gdrive:Work/AI_Video_Analysis/{r2_sub}/"')
 
-        for i, vf in enumerate(video_files):
+        for i, vf in enumerate(media_files):
             s_num = i + 1
             v_path = os.path.join(slides_dir, vf)
-            cap = cv2.VideoCapture(v_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            dur = round(total / fps, 2)
-
-            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
-            ret, frame = cap.read()
             mid_name = f"slide_{s_num:02d}_mid.jpg"
             mid_path = os.path.join(slides_dir, mid_name)
-            if ret:
-                cv2.imwrite(mid_path, frame)
-                webp_name = f"slide_{s_num:02d}_mid.webp"
-                cv2.imwrite(os.path.join(slides_dir, webp_name), frame)
-                if brain_shots_dir:
-                    cv2.imwrite(os.path.join(brain_shots_dir, mid_name), frame)
-                    cv2.imwrite(os.path.join(brain_shots_dir, webp_name), frame)
-            cap.release()
+            webp_name = f"slide_{s_num:02d}_mid.webp"
+            dur = 3.0
 
-            analysis = analyze_shot_visuals(mid_path, shot_idx=s_num, total_shots=len(video_files))
+            if vf.lower().endswith((".mp4", ".mov")):
+                cap = cv2.VideoCapture(v_path)
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if fps > 0:
+                    dur = round(total / fps, 2)
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
+                ret, frame = cap.read()
+                if ret:
+                    cv2.imwrite(mid_path, frame)
+                    cv2.imwrite(os.path.join(slides_dir, webp_name), frame)
+                    if brain_shots_dir:
+                        cv2.imwrite(os.path.join(brain_shots_dir, mid_name), frame)
+                        cv2.imwrite(os.path.join(brain_shots_dir, webp_name), frame)
+                cap.release()
+            else:
+                frame = cv2.imread(v_path)
+                if frame is not None:
+                    cv2.imwrite(mid_path, frame)
+                    cv2.imwrite(os.path.join(slides_dir, webp_name), frame)
+                    if brain_shots_dir:
+                        cv2.imwrite(os.path.join(brain_shots_dir, mid_name), frame)
+                        cv2.imwrite(os.path.join(brain_shots_dir, webp_name), frame)
+
+            analysis = analyze_shot_visuals(mid_path, shot_idx=s_num, total_shots=len(media_files))
             s_enc = "/".join([urllib.parse.quote(p) for p in f"{r2_sub}/{vf}".split("/")])
             slide_r2_url = f"{R2_MEDIA_BASE}/{s_enc}"
             all_vids.append({"name": f"Slide {s_num:02d}", "rel_url": slide_r2_url})
@@ -985,7 +1012,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
             meta = {
                 "title": title_clean.replace('_', ' '),
                 "uploader": uploader_clean,
-                "webpage_url": items[0].get("url") if items and items[0].get("url") else (f"https://www.instagram.com/reel/{shortcode}/" if shortcode != "video" else ""),
+                "webpage_url": items[0].get("url") if items and items[0].get("url") else (f"https://www.instagram.com/reels/{shortcode}/" if shortcode != "video" else ""),
                 "duration_seconds": int(duration_sec),
                 "aspect_ratio": "9:16"
             }
@@ -1018,7 +1045,7 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
     elif hook_takeaway:
         overview_display = f"⚡ {hook_takeaway}"
     if is_carousel:
-        first_slide_vid = os.path.join(slides_dir, video_files[0]) if video_files else ""
+        first_slide_vid = os.path.join(slides_dir, media_files[0]) if media_files else ""
         detected_speech = extract_video_dialogue(first_slide_vid) if first_slide_vid else {"has_speech": False, "transcription": "", "segments": []}
     else:
         detected_speech = extract_video_dialogue(video_dest)
@@ -1032,7 +1059,8 @@ def process_video_or_carousel(url_or_path, output_base=None, brain_artifact_dir=
         speech_data=detected_speech,
         source_url=items[0].get("url") if items else "",
         creator_url="https://www.lazada.vn/shop/ulanzi" if "ulanzi" in uploader_clean else f"https://www.instagram.com/{uploader_clean}/",
-        youtube_url=youtube_url
+        youtube_url=youtube_url,
+        all_vids=all_vids
     )
 
     html_file = os.path.join(project_dir, f"{folder_name}.html")
