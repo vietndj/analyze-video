@@ -75,8 +75,25 @@ def fetch_lazada_meta(url):
     try:
         import asyncio
         import re
+        import urllib.request
+        import ssl
         from playwright.async_api import async_playwright
-        
+
+        resolved_url = url
+        shortcode = "lazada_vid"
+        if '/s.' in url:
+            shortcode = url.split('/s.')[-1].split('?')[0]
+            ctx = ssl._create_unverified_context()
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'})
+            try:
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as r:
+                    body = r.read().decode('utf-8', errors='ignore')
+                    m = re.search(r'https://www\.lazada\.vn/products/[^\'\" ]+', body)
+                    if m:
+                        resolved_url = m.group(0).split('?')[0]
+            except Exception as e:
+                print(f"[-] Lazada redirect resolve error: {e}")
+
         async def _extract(target_url):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
@@ -85,53 +102,53 @@ def fetch_lazada_meta(url):
                 )
                 page = await context.new_page()
                 video_url = None
-                
-                # Keep fallback network listener just in case
+
                 def handle_response(response):
                     nonlocal video_url
                     if video_url: return
                     u = response.url
-                    if ('.mp4' in u or 'video_target' in u) and 'lazcdn.com' in u:
+                    if ('.mp4' in u or 'video_target' in u) and ('lazcdn.com' in u or 'alicdn.com' in u):
                         video_url = u
 
                 page.on('response', handle_response)
-                await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+                await page.goto(target_url, wait_until='networkidle', timeout=30000)
                 title = await page.title()
-                
-                for _ in range(15):
+
+                for _ in range(12):
                     if video_url:
                         break
-                    # Aggressively click video player
                     try:
                         await page.evaluate('''() => {
-                            let btn = document.querySelector('.gallery-preview-panel-v2__video-player, .gallery-preview-panel-v2__video, [class*="video"]');
-                            if (btn) btn.click();
+                            let targets = document.querySelectorAll('.gallery-preview-panel__video-cover, .gallery-preview-panel-v2__video-player, [class*="video"], [class*="play"]');
+                            for (let t of targets) {
+                                try { t.click(); } catch(e){}
+                            }
                         }''')
                     except Exception:
                         pass
-                    
-                    # Extract from video tag
+
                     try:
-                        videos = await page.evaluate('''() => {
-                            return Array.from(document.querySelectorAll('video')).map(v => v.src).filter(src => src && src.length > 0 && src.startsWith('http'));
+                        v_src = await page.evaluate('''() => {
+                            let v = document.querySelector('video');
+                            return v ? (v.src || v.currentSrc) : null;
                         }''')
-                        if videos:
-                            video_url = videos[0]
+                        if v_src and v_src.startswith('http'):
+                            video_url = v_src
                             break
                     except Exception:
                         pass
-                        
-                    await asyncio.sleep(0.5)
-                    
+
+                    await asyncio.sleep(0.8)
+
                 await browser.close()
                 return title, video_url
 
-        title, video_url = asyncio.run(_extract(url))
+        title, video_url = asyncio.run(_extract(resolved_url))
         if video_url:
             clean_title = re.sub(r'^(?:Lazada\.vn\s*[-|:]\s*|Ulanzi\s*\|\s*)', '', title, flags=re.I).strip()
-            if not clean_title or clean_title == "Lazada":
-                clean_title = "Ulanzi Easy Open Portable Aluminum Trigopod"
-            shortcode = url.split('/s.')[-1].split('?')[0] if '/s.' in url else "oU2DB"
+            clean_title = re.sub(r'\s*\|\s*Lazada.*$', '', clean_title, flags=re.I).strip()
+            if not clean_title or clean_title.lower() == "lazada":
+                clean_title = "Gậy Tự Sướng Ulanzi MT85 Có Đèn Pin Nhỏ và Chân Đế Từ Tính"
             return {
                 "id": shortcode,
                 "uploader": "ulanzi",
